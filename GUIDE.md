@@ -1,6 +1,6 @@
-# Custom Connections Skill
+# Custom Connections — Full Technical Reference
 
-Build and deploy a Custom Connection for Agentforce. This skill guides you through creating the metadata files that let your agent deliver structured responses to your custom client application.
+> **Note:** This is the full technical reference. If you're using the Claude Code skill (`/project:build-custom-connection`), you don't need to read this — the skill handles everything automatically.
 
 ---
 
@@ -288,7 +288,7 @@ Deploy using the Salesforce CLI with `--metadata-dir` (mdapi format):
 sf project deploy start --metadata-dir unpackaged/
 ```
 
-**Why `--metadata-dir` instead of `--manifest`?** The `AiSurface` and `AiResponseFormat` types are pilot metadata not yet in the CLI's type registry. Using `--manifest` (source format) will throw a `RegistryError`. The `--metadata-dir` flag deploys raw metadata API format and bypasses the registry check.
+**Why `--metadata-dir` instead of `--manifest`?** The `AiSurface` and `AiResponseFormat` types are metadata not yet in the CLI's type registry. Using `--manifest` (source format) will throw a `RegistryError`. The `--metadata-dir` flag deploys raw metadata API format and bypasses the registry check.
 
 **Important deployment notes:**
 
@@ -318,7 +318,7 @@ To update an existing connection or response format, redeploy the metadata with 
 ### Prerequisites
 
 1. **External Client App (ECA)** with the `chatbot_api` (Access chatbot services) OAuth scope enabled
-2. **Agent API routing provisioned** on your org (production/sandbox orgs have this by default; internal test orgs may not)
+2. **Agent API routing** available on your org (production and sandbox orgs have this by default)
 3. **Agent is active** in Agent Builder
 
 ### Get an access token
@@ -413,7 +413,7 @@ When the session is started with `"surfaceType": "Custom"`, the platform injects
 
 | Issue | Resolution |
 |---|---|
-| `RegistryError` on deploy | Use `--metadata-dir` flag instead of `--manifest`. Pilot types aren't in the CLI registry. |
+| `RegistryError` on deploy | Use `--metadata-dir` flag instead of `--manifest`. These metadata types aren't in the CLI registry. |
 | `Cannot update record as Agent is Active` | Deactivate the agent in Agent Builder before deploying bundle changes. Reactivate after. |
 | `Surface does not exist in org` | Deploy AiSurface + AiResponseFormat in a separate package first, then deploy the GenAiPlannerBundle update. |
 | Invalid enum for `plannerType` | Don't guess the planner type. Retrieve the existing bundle and copy the value exactly. |
@@ -422,9 +422,6 @@ When the session is started with `"surfaceType": "Custom"`, the platform injects
 | Missing references | All response formats referenced in AiSurface must exist as deployed AiResponseFormat entities. |
 | Surface type mismatch | Ensure `surfaceType` in AiSurface matches `surfaceType` in your plannerSurfaces entry. |
 | Responses not properly formatted | Verify your Agent API session call includes `"surfaceConfig": {"surfaceType": "Custom"}` in the request body. |
-| Agent API returns 404 | The org must have Agent API routing provisioned. Internal orgfarm/pc-rnd environments need explicit tenant provisioning via #foundational-llm-services-support. |
-| `Empty force-config endpoint` (400) | Same as above — the API gateway doesn't know how to route to your org's bot-svc-llm instance. |
-| `RBAC: access denied` on sfproxy | sfproxy requires service mesh mTLS identity. You cannot call it from a laptop even on VPN. Use the public API gateway (`api.salesforce.com`) instead. |
 | Agent Builder preview returns plain text | The Agent Builder preview does NOT support custom connections. Response formats are only injected via the Agent API with `surfaceConfig`. The preview always uses the default channel. |
 | `duplicate value found: PlannerId` | Only one `surfaceType: Custom` connection is allowed per agent. Remove the existing custom surface entry before adding a new one. |
 | Response formats deploy as "Unchanged" but surface says "does not exist" | Ensure response format files are in an `aiResponseFormats/` subdirectory (not at the package root). Flat file structure causes silent no-ops. |
