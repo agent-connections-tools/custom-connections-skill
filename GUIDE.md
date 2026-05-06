@@ -378,20 +378,26 @@ The response will contain structured output matching your AiResponseFormat schem
 
 ## Step 9: Test
 
-### Option A: Agent Builder Preview (fastest)
+### Verify deployment in Agent Builder
 
 1. Open Agent Builder for your agent
-2. The custom connection appears in the connection dropdown
-3. Select it and test conversations directly — you'll see structured responses in the preview panel
+2. Go to the **Connections** tab
+3. Confirm your custom connection appears in the list (e.g., "BaxterCreditUnion")
 
-### Option B: Agent API (end-to-end)
+This confirms the metadata deployed correctly and the connection is wired to your agent.
 
-1. Deploy metadata to a sandbox or production org (not an internal orgfarm unless explicitly provisioned)
+**Important:** The Agent Builder preview pane does NOT support custom connections. The preview always uses the default channel — response formats and surface instructions are not injected. You must test via the Agent API.
+
+### Test via Agent API (end-to-end)
+
+1. Deploy metadata to a sandbox or production org
 2. Create an ECA with `chatbot_api` scope
 3. Get a token and start a session with `"surfaceType": "Custom"`
 4. Send messages that should trigger your response formats
 5. Verify the response payload includes structured format data
 6. Test fallback: send a message that doesn't match any format — agent should respond with plain text
+
+When the session is started with `"surfaceType": "Custom"`, the platform injects your AiResponseFormat definitions as callable tools in the LLM context, and the AiSurface instructions are added to the system prompt. This only happens through the Agent API — not in the Agent Builder preview.
 
 ### What to validate
 
@@ -419,6 +425,9 @@ The response will contain structured output matching your AiResponseFormat schem
 | Agent API returns 404 | The org must have Agent API routing provisioned. Internal orgfarm/pc-rnd environments need explicit tenant provisioning via #foundational-llm-services-support. |
 | `Empty force-config endpoint` (400) | Same as above — the API gateway doesn't know how to route to your org's bot-svc-llm instance. |
 | `RBAC: access denied` on sfproxy | sfproxy requires service mesh mTLS identity. You cannot call it from a laptop even on VPN. Use the public API gateway (`api.salesforce.com`) instead. |
+| Agent Builder preview returns plain text | The Agent Builder preview does NOT support custom connections. Response formats are only injected via the Agent API with `surfaceConfig`. The preview always uses the default channel. |
+| `duplicate value found: PlannerId` | Only one `surfaceType: Custom` connection is allowed per agent. Remove the existing custom surface entry before adding a new one. |
+| Response formats deploy as "Unchanged" but surface says "does not exist" | Ensure response format files are in an `aiResponseFormats/` subdirectory (not at the package root). Flat file structure causes silent no-ops. |
 
 ---
 

@@ -78,9 +78,11 @@ If you prefer to build manually, see the full step-by-step guide: [GUIDE.md](./G
 
 ## Testing
 
-**Agent Builder (fastest):** Open your agent in Agent Builder. The custom connection appears in the connection dropdown. Select it and chat — you'll see structured responses in the preview.
+**Verify deployment:** Open Agent Builder → Connections tab. Your custom connection should appear in the list. This confirms the metadata is deployed correctly.
 
-**Agent API (end-to-end):** Start a session with `"surfaceConfig": {"surfaceType": "Custom"}` in your session creation call. See [GUIDE.md](./GUIDE.md) for full API examples.
+**Agent API (required for structured responses):** Start a session with `"surfaceConfig": {"surfaceType": "Custom"}` in your session creation call. The Agent API injects your response formats as tools and surface instructions into the LLM context. See [GUIDE.md](./GUIDE.md) for full API examples.
+
+**Note:** The Agent Builder preview pane does NOT support custom connections. It always uses the default channel. You must test structured responses via the Agent API.
 
 ## Troubleshooting
 
@@ -90,7 +92,8 @@ If you prefer to build manually, see the full step-by-step guide: [GUIDE.md](./G
 | `Cannot update record as Agent is Active` | Deactivate agent in Agent Builder first |
 | `Surface does not exist in org` | Deploy surface/formats before updating the bundle |
 | Agent API returns 404 | Org needs Agent API routing provisioned |
-| Responses come back as plain text | Check `surfaceConfig` in your session call |
+| Responses come back as plain text | Ensure `surfaceConfig` is set in your session call. Agent Builder preview doesn't support custom connections — use the Agent API. |
+| `duplicate value found: PlannerId` | Only one custom connection per agent is allowed. Remove existing custom surface before adding a new one. |
 
 ## License
 
