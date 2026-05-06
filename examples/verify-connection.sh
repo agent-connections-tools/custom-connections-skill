@@ -43,6 +43,7 @@ SESSION_RESPONSE=$(curl -s -X POST "$API_URL/einstein/ai-agent/v1/agents/$AGENT_
   -H "Content-Type: application/json" \
   -d "{
     \"externalSessionKey\": \"verify-$(date +%s)\",
+    \"forceConfigEndpoint\": \"$ORG_URL\",
     \"instanceConfig\": {\"endpoint\": \"$ORG_URL\"},
     \"streamingConfig\": {\"useStreaming\": false},
     \"surfaceConfig\": {\"surfaceType\": \"Custom\"}
