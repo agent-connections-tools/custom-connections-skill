@@ -12,13 +12,12 @@ Custom Connections let you define your own connection type with structured respo
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed
 - [Salesforce CLI](https://developer.salesforce.com/tools/salesforcecli) (`sf`) installed and authenticated to your org
-- Pilot permissions enabled on your org (`AgentSurfSecondResPerm` + `AgentSurfThirdResPerm`) — ask your Salesforce rep
 - An existing agent you want to add the custom connection to
 
 ### Usage
 
 ```bash
-git clone https://github.com/anthropics/custom-connections-skill.git
+git clone https://github.com/agent-connections-tools/custom-connections-skill.git
 cd custom-connections-skill
 claude
 ```

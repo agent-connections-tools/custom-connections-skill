@@ -16,8 +16,7 @@ Make sure you have:
 
 1. **Agent API connectivity** — Your client can start sessions and receive responses via the Agent API.
 2. **External Client App (ECA)** — Configured to allow secure connection to the Agent API.
-3. **Pilot permissions enabled** — A Salesforce representative has enabled `AgentSurfSecondResPerm` and `AgentSurfThirdResPerm` in your org.
-4. **Metadata API version 66.0 or later** — Required for retrieval and deployment.
+3. **Metadata API version 66.0 or later** — Required for retrieval and deployment.
 
 ---
 
