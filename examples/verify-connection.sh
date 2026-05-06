@@ -9,7 +9,7 @@ CLIENT_ID="${2:?}"
 CLIENT_SECRET="${3:?}"
 AGENT_NAME="${4:?}"
 
-ORG_URL=$(sf org display --target-org "$ORG_ALIAS" --json 2>/dev/null | grep -o '"instanceUrl":"[^"]*"' | cut -d'"' -f4)
+ORG_URL=$(sf org display --target-org "$ORG_ALIAS" --json 2>&1 | grep '"instanceUrl"' | grep -o 'https://[^"]*')
 if [ -z "$ORG_URL" ]; then
     echo "FAILED: Could not resolve org URL for alias '$ORG_ALIAS'"
     exit 1
@@ -22,7 +22,11 @@ TOKEN_RESPONSE=$(curl -s -X POST "$ORG_URL/services/oauth2/token" \
   -d "client_secret=$CLIENT_SECRET")
 
 ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
-API_URL=$(echo "$TOKEN_RESPONSE" | grep -o '"api_instance_url":"[^"]*"' | cut -d'"' -f4)
+API_URL=$(echo "$TOKEN_RESPONSE" | grep -o '"instance_url":"[^"]*"' | cut -d'"' -f4)
+# Fallback to api_instance_url if instance_url not present
+if [ -z "$API_URL" ]; then
+    API_URL=$(echo "$TOKEN_RESPONSE" | grep -o '"api_instance_url":"[^"]*"' | cut -d'"' -f4)
+fi
 
 if [ -z "$ACCESS_TOKEN" ]; then
     echo "FAILED: Could not authenticate. Check your client_id and client_secret."
@@ -31,7 +35,7 @@ if [ -z "$ACCESS_TOKEN" ]; then
 fi
 
 # Get agent ID
-AGENT_ID=$(sf data query --query "SELECT Id FROM BotDefinition WHERE DeveloperName='$AGENT_NAME'" --target-org "$ORG_ALIAS" --json 2>/dev/null | grep -o '"Id":"[^"]*"' | head -1 | cut -d'"' -f4)
+AGENT_ID=$(sf data query --query "SELECT Id FROM BotDefinition WHERE DeveloperName='$AGENT_NAME'" --target-org "$ORG_ALIAS" --json 2>&1 | grep '"Id"' | head -1 | grep -o '"[a-zA-Z0-9]\{18\}"' | tr -d '"')
 if [ -z "$AGENT_ID" ]; then
     echo "FAILED: No agent found with DeveloperName '$AGENT_NAME'"
     exit 1
@@ -49,7 +53,7 @@ SESSION_RESPONSE=$(curl -s -X POST "$API_URL/einstein/ai-agent/v1/agents/$AGENT_
     \"surfaceConfig\": {\"surfaceType\": \"Custom\"}
   }")
 
-SESSION_ID=$(echo "$SESSION_RESPONSE" | grep -o '"sessionId":"[^"]*"' | cut -d'"' -f4)
+SESSION_ID=$(echo "$SESSION_RESPONSE" | grep -o '"sessionId" *: *"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"')
 
 if [ -n "$SESSION_ID" ]; then
     echo "CONNECTED — session started successfully."
