@@ -87,6 +87,11 @@ Customer_Support_Agent     Customer Support Agent
 
 Use the value from the `DeveloperName` column. Append `_v1` to it (e.g., `Customer_Support_Agent_v1`) — that's your bundle name.
 
+> **If the deploy script says it can't find the bundle:** Your agent may have been versioned (`_v2`, `_v3`, etc.). Run this to get the exact bundle name:
+> ```bash
+> sf project retrieve start --metadata GenAiPlannerBundle --target-org my-org --output-dir check/ && find check/ -name "*.genAiPlannerBundle"
+> ```
+
 **What the script does:**
 - Deploys your response formats and custom connection definition
 - Retrieves your agent's existing config
