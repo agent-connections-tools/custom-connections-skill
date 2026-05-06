@@ -161,9 +161,22 @@ If you prefer to build manually, see the full step-by-step guide: [GUIDE.md](./G
 - Deactivate your agent before updating its config, then reactivate after
 - Keep response formats under 7 per connection — more than that and the agent struggles to pick the right one
 
+## Examples
+
+The [`examples/`](./examples/) directory includes:
+
+- **[`examples/acme-portal/`](./examples/acme-portal/)** — Pre-generated metadata for a fictional client. Browse this to see exactly what the skill produces, or deploy it to a sandbox to test the full flow.
+- **[`examples/verify-connection.sh`](./examples/verify-connection.sh)** — Quick script to verify your custom connection works. Starts an Agent API session with `surfaceType: Custom` and prints "CONNECTED" or "FAILED."
+
+```bash
+./examples/verify-connection.sh <org-alias> <client-id> <client-secret> <agent-developer-name>
+```
+
 ## Testing
 
 **Verify deployment:** Open Agent Builder → Connections tab. Your custom connection should appear in the list. This confirms the metadata is deployed correctly.
+
+**Quick check via script:** Run `examples/verify-connection.sh` to confirm the Agent API accepts your custom surface (requires an External Client App — see [GUIDE.md](./GUIDE.md#step-8-use-the-custom-connection-via-agent-api)).
 
 **Agent API (required for structured responses):** Start a session with `"surfaceConfig": {"surfaceType": "Custom"}` in your session creation call. The Agent API injects your response formats as tools and surface instructions into the LLM context. See [GUIDE.md](./GUIDE.md) for full API examples.
 

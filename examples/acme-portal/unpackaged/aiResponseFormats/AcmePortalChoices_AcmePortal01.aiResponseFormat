@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AiResponseFormat xmlns="http://soap.sforce.com/2006/04/metadata">
+    <description>A response action for AcmePortal. Use this to prompt the user to select one of many available text choices when the number of choices is GREATER THAN 1 and LESSER THAN 8.</description>
+
+    <input>{"type":"object","properties":{"message":{"type":"string","description":"Contextual message displayed above the choices"},"choices":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":7}},"required":["message","choices"]}</input>
+
+    <instructions>
+        <instruction>Always use AcmePortalChoices when showing choice text responses with GREATER THAN 1 choice and LESS THAN 8 choices to the user.</instruction>
+        <sortOrder>1</sortOrder>
+    </instructions>
+
+    <masterLabel>Acme Portal Chat Choice Response</masterLabel>
+</AiResponseFormat>
