@@ -35,7 +35,7 @@ cat > retrieved/package.xml << EOF
         <members>${BUNDLE_NAME}</members>
         <name>GenAiPlannerBundle</name>
     </types>
-    <version>67.0</version>
+    <version>66.0</version>
 </Package>
 EOF
 
