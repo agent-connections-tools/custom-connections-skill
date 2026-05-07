@@ -18,7 +18,7 @@ unpackaged/
 **3 response formats:**
 - Text Choices — clickable text options (2-7 items)
 - Choices with Images — product/service cards with thumbnails
-- Time Picker — appointment/callback time selection
+- Time Picker — appointment/callback time selection (uses Slack Block Kit schema as a reference pattern — replace with your own time picker schema if your client uses a different format)
 
 **1 custom surface** connecting them all, with instructions to keep responses brief and avoid formats for single-choice responses.
 

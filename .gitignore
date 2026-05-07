@@ -1,0 +1,5 @@
+output/
+retrieved/
+check/
+*.bak
+.DS_Store

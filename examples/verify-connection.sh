@@ -1,6 +1,7 @@
 #!/bin/bash
 # Verify your custom connection works by starting an Agent API session.
 # Usage: ./verify-connection.sh <org-alias> <client-id> <client-secret> <agent-developer-name>
+# Note: JSON parsing uses grep/cut (no jq dependency). For production use, parse with jq.
 
 set -e
 
