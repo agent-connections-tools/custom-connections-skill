@@ -354,12 +354,11 @@ curl -X POST "<api_instance_url>/einstein/ai-agent/v1/agents/<agentId>/sessions"
   -H "Content-Type: application/json" \
   -d '{
     "externalSessionKey": "unique-session-id",
-    "forceConfigEndpoint": "https://<your-org>.my.salesforce.com",
     "instanceConfig": {
       "endpoint": "https://<your-org>.my.salesforce.com"
     },
-    "streamingConfig": {
-      "useStreaming": false
+    "streamingCapabilities": {
+      "chunkTypes": ["Text"]
     },
     "surfaceConfig": {
       "surfaceType": "Custom"
