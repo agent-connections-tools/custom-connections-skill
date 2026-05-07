@@ -318,9 +318,22 @@ To update an existing connection or response format, redeploy the metadata with 
 
 ### Prerequisites
 
-1. **External Client App (ECA)** with the `chatbot_api` (Access chatbot services) OAuth scope enabled
-2. **Agent API routing** available on your org (production and sandbox orgs have this by default)
-3. **Agent is active** in Agent Builder
+1. **External Client App (ECA)** — create one in Setup → External Client Apps Manager
+2. **OAuth scopes** — enable all four:
+   - `api` (Access and manage your data)
+   - `refresh_token, offline_access` (Perform requests at any time)
+   - `chatbot_api` (Access chatbot services)
+   - `sfap_api` (Salesforce API Platform access)
+3. **OAuth settings** — enable these two:
+   - "Client Credentials Flow"
+   - "JWT-based access tokens for named users"
+4. **OAuth settings** — deselect these three:
+   - "Require Secret for Web Server Flow"
+   - "Require Secret for Refresh Token Flow"
+   - "Require Proof Key for Code Exchange (PKCE) Extension for Supported Authorization Flows"
+5. **Policy tab** — enable Client Credentials Flow and set "Run As (Username)" to a user with **API Only access** permission
+6. **Agent API routing** available on your org (production and sandbox orgs have this by default)
+7. **Agent is active** in Agent Builder
 
 ### Get an access token
 

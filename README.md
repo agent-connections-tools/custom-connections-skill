@@ -177,9 +177,9 @@ The [`examples/`](./examples/) directory includes:
 **Verify deployment:** Open Agent Builder → Connections tab. Your custom connection should appear in the list. This confirms the metadata is deployed correctly.
 
 **Quick check via script:** Run `examples/verify-connection.sh` to confirm the Agent API accepts your custom surface. Prerequisites:
-- An External Client App (ECA) with `chatbot_api` scope enabled
-- Client Credentials Flow enabled on the ECA with an Execution User assigned
-- See [GUIDE.md](./GUIDE.md#step-8-use-the-custom-connection-via-agent-api) for full setup steps.
+- An External Client App (ECA) with OAuth scopes: `api`, `refresh_token`, `chatbot_api`, `sfap_api`
+- Client Credentials Flow enabled with a Run As user that has "API Only access" permission
+- See [GUIDE.md](./GUIDE.md#step-8-use-the-custom-connection-via-agent-api) for full ECA setup steps.
 
 **Agent API (required for structured responses):** Start a session with `"surfaceConfig": {"surfaceType": "Custom"}` in your session creation call. The Agent API injects your response formats as tools and surface instructions into the LLM context. See [GUIDE.md](./GUIDE.md) for full API examples.
 
