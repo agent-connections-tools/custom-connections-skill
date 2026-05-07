@@ -100,7 +100,7 @@ File: `aiResponseFormats/<YourClient>Choices_<surfaceId>.aiResponseFormat`
 <AiResponseFormat xmlns="http://soap.sforce.com/2006/04/metadata">
     <description>A response action for <YourClient>. Use this to prompt the user to select one of many available text choices when the number of choices is GREATER THAN 1 and LESSER THAN 8.</description>
 
-    <input>{"type":"object","properties":{"message":{"type":"string","description":"Placeholder for message input"},"choices":{"type":"array","items":{"type":"string"}}},"required":["message","choices"]}</input>
+    <input>{"type":"object","properties":{"message":{"type":"string","description":"A brief message introducing the choices"},"choices":{"type":"array","items":{"type":"string"}}},"required":["message","choices"]}</input>
 
     <instructions>
         <instruction>Always use <YourClient>Choices when showing choice text responses with GREATER THAN 1 choice and LESS THAN 8 choices to the user.</instruction>
@@ -120,7 +120,7 @@ File: `aiResponseFormats/<YourClient>ChoicesWithImages_<surfaceId>.aiResponseFor
 <AiResponseFormat xmlns="http://soap.sforce.com/2006/04/metadata">
     <description>A response action for <YourClient>. Use this to prompt the user to select one of many choices with accompanying images, such as product listings.</description>
 
-    <input>{"type":"object","properties":{"message":{"type":"string","description":"Placeholder for message input"},"choices":{"type":"array","items":{"type":"object","properties":{"title":{"type":"string"},"imageUrl":{"type":"string"},"actionText":{"type":"string"}},"required":["title","imageUrl","actionText"]}}},"required":["message","choices"]}</input>
+    <input>{"type":"object","properties":{"message":{"type":"string","description":"A brief message introducing the choices"},"choices":{"type":"array","items":{"type":"object","properties":{"title":{"type":"string"},"imageUrl":{"type":"string"},"actionText":{"type":"string"}},"required":["title","imageUrl","actionText"]}}},"required":["message","choices"]}</input>
 
     <instructions>
         <instruction>Always use <YourClient>ChoicesWithImages when showing choices with images with GREATER THAN 1 choice and LESS THAN 8 choices to the user.</instruction>
@@ -207,7 +207,7 @@ File: `aiSurfaces/<YourClient>_<surfaceId>.aiSurface`
         <sortOrder>1</sortOrder>
     </instructions>
     <instructions>
-        <instruction>Do not use response formats where the response contains more than 10 choices.</instruction>
+        <instruction>Do not use response formats where the response contains more than 7 choices.</instruction>
         <sortOrder>2</sortOrder>
     </instructions>
     <instructions>
@@ -262,6 +262,7 @@ Open the retrieved `.genAiPlannerBundle` file and add this inside the root eleme
 
 ```xml
 <plannerSurfaces>
+    <adaptiveResponseAllowed>true</adaptiveResponseAllowed>
     <callRecordingAllowed>false</callRecordingAllowed>
     <surface><YourClient>_<surfaceId></surface>
     <surfaceType>Custom</surfaceType>

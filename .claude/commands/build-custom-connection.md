@@ -16,7 +16,7 @@ Ask the user these questions ONE AT A TIME (don't dump them all at once):
    - Custom JSON (describe the structure you want)
 3. **Any special instructions for the agent on this connection?** (e.g., "Keep responses under 160 characters", "Always use formal tone", "Never show more than 5 choices")
 
-**Surface ID generation:** Auto-generate the surface ID from the client name. Take the first 3-4 letters (uppercase) and append "01". Examples:
+**Surface ID generation:** Auto-generate the surface ID from the client name. Take the first 2-4 letters (uppercase) and append "01". Examples:
 - UniversalContainers → UC01
 - AcmePortal → ACME01
 - MobileApp → MOBI01
