@@ -383,7 +383,7 @@ The response will contain structured output matching your AiResponseFormat schem
 
 1. Open Agent Builder for your agent
 2. Go to the **Connections** tab
-3. Confirm your custom connection appears in the list (e.g., "BaxterCreditUnion")
+3. Confirm your custom connection appears in the list (e.g., "UniversalContainers")
 
 This confirms the metadata deployed correctly and the connection is wired to your agent.
 
