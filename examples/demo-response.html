@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Custom Connection — Response Demo</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; display: flex; justify-content: center; padding: 40px 20px; }
+        .container { max-width: 860px; width: 100%; }
+        h1 { font-size: 20px; color: #032D60; margin-bottom: 4px; }
+        .subtitle { font-size: 14px; color: #666; margin-bottom: 32px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+        .card { background: white; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); overflow: hidden; }
+        .card-header { background: #032D60; color: white; padding: 12px 16px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+        .card-body { padding: 20px; }
+        .agent-bubble { background: #f0f2f5; border-radius: 12px; padding: 12px 16px; font-size: 14px; color: #333; line-height: 1.4; display: inline-block; max-width: 90%; margin-bottom: 12px; }
+        .choices-container { display: flex; flex-direction: column; gap: 8px; }
+        .choice-btn { background: white; border: 1.5px solid #0176D3; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #0176D3; cursor: pointer; text-align: left; transition: all 0.15s ease; }
+        .choice-btn:hover { background: #0176D3; color: white; transform: translateY(-1px); box-shadow: 0 2px 8px rgba(1,118,211,0.3); }
+        .image-choices { display: flex; flex-direction: column; gap: 10px; }
+        .image-card { display: flex; align-items: center; gap: 12px; border: 1.5px solid #e5e5e5; border-radius: 10px; padding: 10px 14px; cursor: pointer; transition: all 0.15s ease; }
+        .image-card:hover { border-color: #0176D3; box-shadow: 0 2px 8px rgba(1,118,211,0.15); transform: translateY(-1px); }
+        .image-card img { width: 48px; height: 48px; border-radius: 8px; object-fit: cover; background: #e5e5e5; }
+        .image-card-text { flex: 1; }
+        .image-card-title { font-size: 13px; font-weight: 600; color: #333; }
+        .image-card-action { font-size: 12px; color: #0176D3; margin-top: 2px; }
+        .timepicker-wrap { margin-top: 8px; }
+        .timepicker-label { font-size: 13px; color: #555; margin-bottom: 6px; }
+        .timepicker-input { border: 1.5px solid #0176D3; border-radius: 8px; padding: 10px 14px; font-size: 14px; color: #333; width: 140px; }
+        .raw-section { margin-top: 32px; }
+        .raw-title { font-size: 12px; font-weight: 600; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .raw-code { background: #1e1e1e; border-radius: 10px; padding: 16px; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; font-size: 11px; color: #d4d4d4; white-space: pre-wrap; word-break: break-all; overflow-x: auto; line-height: 1.5; }
+        .raw-code .key { color: #9cdcfe; }
+        .raw-code .string { color: #ce9178; }
+        .raw-code .bracket { color: #ffd700; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Custom Connection Response Formats</h1>
+        <p class="subtitle">This is what your client app renders from the structured JSON the agent returns via the Agent API.</p>
+
+        <div class="grid">
+            <div class="card">
+                <div class="card-header">Text Choices</div>
+                <div class="card-body">
+                    <div class="agent-bubble">Here are the available plans. Please select one to learn more:</div>
+                    <div class="choices-container">
+                        <button class="choice-btn">Starter Plan ($5/month)</button>
+                        <button class="choice-btn">Basic Plan ($10/month)</button>
+                        <button class="choice-btn">Professional Plan ($25/month)</button>
+                        <button class="choice-btn">Enterprise Plan ($50/month)</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Choices with Images</div>
+                <div class="card-body">
+                    <div class="agent-bubble">Here are some products that match your search:</div>
+                    <div class="image-choices">
+                        <div class="image-card">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect fill='%230176D3' width='48' height='48' rx='8'/%3E%3Ctext x='50%25' y='54%25' text-anchor='middle' fill='white' font-size='18' dy='.35em'%3EP%3C/text%3E%3C/svg%3E" alt="Premium">
+                            <div class="image-card-text">
+                                <div class="image-card-title">Premium Plan</div>
+                                <div class="image-card-action">Select Premium</div>
+                            </div>
+                        </div>
+                        <div class="image-card">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect fill='%2316A765' width='48' height='48' rx='8'/%3E%3Ctext x='50%25' y='54%25' text-anchor='middle' fill='white' font-size='18' dy='.35em'%3EB%3C/text%3E%3C/svg%3E" alt="Basic">
+                            <div class="image-card-text">
+                                <div class="image-card-title">Basic Plan</div>
+                                <div class="image-card-action">Select Basic</div>
+                            </div>
+                        </div>
+                        <div class="image-card">
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect fill='%23FF6B35' width='48' height='48' rx='8'/%3E%3Ctext x='50%25' y='54%25' text-anchor='middle' fill='white' font-size='18' dy='.35em'%3ES%3C/text%3E%3C/svg%3E" alt="Starter">
+                            <div class="image-card-text">
+                                <div class="image-card-title">Starter Plan</div>
+                                <div class="image-card-action">Select Starter</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Time Picker</div>
+                <div class="card-body">
+                    <div class="agent-bubble">When would you like to schedule your appointment?</div>
+                    <div class="timepicker-wrap">
+                        <div class="timepicker-label">Select a time:</div>
+                        <input type="time" class="timepicker-input" value="09:00">
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Plain Text (Fallback)</div>
+                <div class="card-body">
+                    <div class="agent-bubble">Your account balance is $4,231.56. Your next payment of $125.00 is due on June 15th. Is there anything else I can help you with?</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="raw-section">
+            <div class="raw-title">What the Agent API actually returns (result[] from a live test)</div>
+            <pre class="raw-code">{
+  <span class="key">"type"</span>: <span class="string">"SURFACE_ACTION__AcmePortalChoices_ACME01"</span>,
+  <span class="key">"value"</span>: <span class="bracket">{</span>
+    <span class="key">"message"</span>: <span class="string">"Here are the available plans. Please select one to learn more:"</span>,
+    <span class="key">"choices"</span>: <span class="bracket">[</span>
+      <span class="string">"Starter Plan ($5/month)"</span>,
+      <span class="string">"Basic Plan ($10/month)"</span>,
+      <span class="string">"Professional Plan ($25/month)"</span>,
+      <span class="string">"Enterprise Plan ($50/month)"</span>
+    <span class="bracket">]</span>
+  <span class="bracket">}</span>
+}</pre>
+        </div>
+    </div>
+</body>
+</html>

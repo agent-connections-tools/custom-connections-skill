@@ -166,6 +166,7 @@ If you prefer to build manually, see the full step-by-step guide: [GUIDE.md](./G
 The [`examples/`](./examples/) directory includes:
 
 - **[`examples/acme-portal/`](./examples/acme-portal/)** — Pre-generated metadata for a fictional client. Browse this to see exactly what the skill produces, or deploy it to a sandbox to test the full flow.
+- **[`examples/demo-response.html`](./examples/demo-response.html)** — Open in a browser to see what structured responses look like when rendered. Shows all format types side by side.
 - **[`examples/verify-connection.sh`](./examples/verify-connection.sh)** — Quick script to verify your custom connection works. Starts an Agent API session with `surfaceType: Custom` and prints "CONNECTED" or "FAILED."
 
 ```bash
