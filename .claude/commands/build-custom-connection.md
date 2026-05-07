@@ -236,7 +236,7 @@ Use these exact XML structures. Replace placeholders with the user's values.
         <sortOrder>1</sortOrder>
     </instructions>
     <instructions>
-        <instruction>Do not use response formats where the response contains more than 10 choices.</instruction>
+        <instruction>Do not use response formats where the response contains more than 7 choices.</instruction>
         <sortOrder>2</sortOrder>
     </instructions>
     <instructions>
