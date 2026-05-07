@@ -23,10 +23,10 @@ TOKEN_RESPONSE=$(curl -s -X POST "$ORG_URL/services/oauth2/token" \
   -d "client_secret=$CLIENT_SECRET")
 
 ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
-API_URL=$(echo "$TOKEN_RESPONSE" | grep -o '"instance_url":"[^"]*"' | cut -d'"' -f4)
-# Fallback to api_instance_url if instance_url not present
+# Prefer api_instance_url (Agent API runtime) over instance_url (org URL)
+API_URL=$(echo "$TOKEN_RESPONSE" | grep -o '"api_instance_url":"[^"]*"' | cut -d'"' -f4)
 if [ -z "$API_URL" ]; then
-    API_URL=$(echo "$TOKEN_RESPONSE" | grep -o '"api_instance_url":"[^"]*"' | cut -d'"' -f4)
+    API_URL=$(echo "$TOKEN_RESPONSE" | grep -o '"instance_url":"[^"]*"' | cut -d'"' -f4)
 fi
 
 if [ -z "$ACCESS_TOKEN" ]; then

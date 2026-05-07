@@ -63,7 +63,7 @@ echo ""
 echo "⚠️  Make sure your agent is DEACTIVATED before continuing."
 echo "   Go to: Setup → Agents → select your agent → Deactivate"
 echo ""
-read -p "Press Enter when your agent is deactivated (or Ctrl+C to cancel)..."
+read -rp "Press Enter when your agent is deactivated (or Ctrl+C to cancel)..."
 echo ""
 
 echo "=== Stage 1: Deploying AiResponseFormat + AiSurface ==="
@@ -93,28 +93,36 @@ fi
 
 echo "Found bundle: $BUNDLE_FILE"
 
-# Check if a Custom plannerSurfaces entry already exists — replace it if so
-if grep -q "<surfaceType>Custom</surfaceType>" "$BUNDLE_FILE"; then
-    echo "Existing custom connection found — replacing it..."
-    # Remove existing Custom plannerSurfaces block
-    sed -i.bak '/<plannerSurfaces>/{
-        N
-        N
-        N
-        /<surfaceType>Custom<\/surfaceType>/d
-    }' "$BUNDLE_FILE"
-    # Clean up any leftover empty plannerSurfaces blocks
-    sed -i.bak '/<plannerSurfaces>/{N;N;N;/<\/plannerSurfaces>/{/<surfaceType>Custom/d}}' "$BUNDLE_FILE"
+# Check if this surface is already wired
+if grep -q "{ClientName}_{surfaceId}" "$BUNDLE_FILE"; then
+    echo "Surface already present in bundle — skipping."
+else
+    # If a different Custom surface exists, warn (only one allowed per agent)
+    if grep -q "<surfaceType>Custom</surfaceType>" "$BUNDLE_FILE"; then
+        echo "WARNING: This agent already has a custom connection. Only one is allowed per agent."
+        echo "Remove the existing custom surface in Agent Builder first, then re-run."
+        exit 1
+    fi
+    # Add the new plannerSurfaces entry before the closing tag
+    SURFACE_BLOCK='    <plannerSurfaces>\n        <adaptiveResponseAllowed>true</adaptiveResponseAllowed>\n        <callRecordingAllowed>false</callRecordingAllowed>\n        <surface>{ClientName}_{surfaceId}</surface>\n        <surfaceType>Custom</surfaceType>\n    </plannerSurfaces>'
+    sed -i.bak "s|</GenAiPlannerBundle>|${SURFACE_BLOCK}\n</GenAiPlannerBundle>|" "$BUNDLE_FILE"
+    rm -f "${BUNDLE_FILE}.bak"
 fi
 
-# Add the new plannerSurfaces entry before the closing tag
-sed -i.bak "s|</GenAiPlannerBundle>|    <plannerSurfaces>\n        <callRecordingAllowed>false</callRecordingAllowed>\n        <surface>{ClientName}_{surfaceId}</surface>\n        <surfaceType>Custom</surfaceType>\n    </plannerSurfaces>\n</GenAiPlannerBundle>|" "$BUNDLE_FILE"
-
-# Clean up backup files
-find retrieved/ -name "*.bak" -delete
+# Add package.xml for the redeploy
+cat > retrieved/package.xml << PKGEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<Package xmlns="http://soap.sforce.com/2006/04/metadata">
+    <types>
+        <members>${BUNDLE}</members>
+        <name>GenAiPlannerBundle</name>
+    </types>
+    <version>66.0</version>
+</Package>
+PKGEOF
 
 echo "Deploying updated bundle..."
-sf project deploy start --metadata-dir retrieved/ --target-org "$ORG"
+sf project deploy start --metadata-dir retrieved/ --target-org "$ORG" --wait 5
 
 echo ""
 echo "=== Done! ==="
