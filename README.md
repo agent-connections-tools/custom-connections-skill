@@ -186,6 +186,8 @@ The [`examples/`](./examples/) directory includes:
 
 **Note:** The Agent Builder preview pane does NOT support custom connections. It always uses the default channel. You must test structured responses via the Agent API.
 
+**Important:** Your agent needs at least one topic that produces list-like responses (e.g., product options, plan choices) for the response formats to trigger. The agent only uses structured formats when it has multiple items to present — if your agent has no topics configured, it will fall back to plain text.
+
 ## Troubleshooting
 
 | Issue | Fix |
