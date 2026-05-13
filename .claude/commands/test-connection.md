@@ -314,10 +314,14 @@ This runs whether the test passed, failed, or hit an error mid-flight. Wrap the 
 
 ```bash
 curl -s -X DELETE "$API_URL/einstein/ai-agent/v1/sessions/$SESSION_ID" \
-  -H "Authorization: Bearer $ACCESS_TOKEN" -o /dev/null
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "x-session-end-reason: UserRequest" \
+  -o /dev/null
 ```
 
-Don't show this to the user as a separate step — just do it silently. If DELETE fails, don't escalate; sessions auto-expire anyway.
+The `x-session-end-reason` header is required — without it, the DELETE returns 400 with `ConstraintViolationException: arg2 must not be null`. Use `UserRequest` as the value (the API returns `SessionEnded / ClientRequest` as confirmation).
+
+Don't show this to the user as a separate step — just do it silently. If DELETE fails for any other reason, don't escalate; sessions auto-expire anyway.
 
 ## Step 13: Show the results
 

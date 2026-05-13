@@ -142,7 +142,7 @@ This agent's `MicrosoftTeams` connection has a response format (`TeamsText`) tha
 - Message sent, response received within ~10 seconds
 - Response renders visually with numbered choices (Starter Plan, Basic Plan, etc.)
 - After response, asks "Want to send another message, or are you done?"
-- User says "done" → session deleted (DELETE call to `/sessions/<id>`)
+- User says "done" → session deleted (DELETE call to `/sessions/<id>` with `x-session-end-reason: UserRequest` header)
 - Final report: 9 passed, 0 warnings, 0 issues
 - JSON saved to `/tmp/test-connection-report.json`
 
@@ -396,7 +396,7 @@ If running Part 2, expected result:
 - Inline status display shows "active" / "inactive" right after retrieval?
 
 ### 7. Cleanup
-- DELETE call to `/sessions/<id>` happens at the end?
+- DELETE call to `/sessions/<id>` happens at the end, **with the `x-session-end-reason: UserRequest` header** (required — without it the API returns 400)?
 - DELETE happens even on failure (try/finally pattern)?
 - Temp directory cleanup at the end?
 
