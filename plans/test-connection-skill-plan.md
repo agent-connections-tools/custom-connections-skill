@@ -499,6 +499,14 @@ The script stays useful for CI/CD smoke tests. The skill is for interactive test
 
 ---
 
+## Build-Time Notes (not plan changes — implementation guidance)
+
+These came up during sign-off and belong in the skill prompt, not the plan:
+
+- **Future-proof the field list:** If the Agent API returns an "Unrecognized field" error the skill hasn't seen before, show the raw error verbatim and suggest the user check for Agent API changelog updates. Don't try to maintain a hardcoded valid-fields list in the skill prompt — let the API tell us when it changes. (The 14 fields documented in Validation Results are a snapshot, not a contract.)
+
+---
+
 ## Reviewer Sign-off Checklist
 
 Before declaring v3 final, confirm:
