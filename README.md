@@ -1,21 +1,22 @@
 # Custom Connections Skills for Agentforce
 
-Two Claude Code skills that take the pain out of working with Custom Connections in Agentforce — one to **build** them, one to **diagnose** them when something's wrong.
+Three Claude Code skills that take the pain out of working with Custom Connections in Agentforce — one to **build** them, one to **diagnose** them when something's wrong, and one to **test** them end-to-end.
 
-## The two skills
+## The three skills
 
 | Skill | What it does | When to use |
 |------|------|------|
 | **`/project:build-custom-connection`** | Generates all the metadata for a new custom connection. Answer 3 questions, get a deploy-ready package. | First time setting up a custom connection |
 | **`/project:diagnose-connection`** | Checks an existing connection for problems and tells you exactly what's wrong in plain English. Read-only — never changes anything in your org. | When something isn't working and you want to know why |
+| **`/project:test-connection`** | Sends a real message through the connection via the Agent API and shows you what came back. Walks you through External Client App setup if you don't have one. | When you want to confirm the connection actually works at runtime, not just in metadata |
 
-Both skills work the same way: answer a few plain-English questions, the skill does the rest.
+All three skills work the same way: answer a few plain-English questions, the skill does the rest.
 
 ## What problem does this solve?
 
 **Before:** You want your agent to respond with rich UI (buttons, image cards, time pickers) instead of plain text. But setting this up means writing XML metadata files by hand, understanding Salesforce deployment commands, and wiring things together across multiple config layers. Then if something breaks, the error messages are cryptic — "Cannot update record as Agent is Active" or "Surface does not exist in org" with no clear path forward. Even experienced developers find this tedious.
 
-**After:** You run one skill, answer a few plain-English questions, and get a fully automated deploy script (for new connections) or a clear diagnostic report (for broken ones). No XML editing, no cryptic errors.
+**After:** You run one skill, answer a few plain-English questions, and get a fully automated deploy script (for new connections), a clear diagnostic report (for broken ones), or a live test report (to confirm everything works end-to-end). No XML editing, no cryptic errors.
 
 ## Is this for me?
 
@@ -178,6 +179,75 @@ The diagnostic looks for the most common problems with custom connections:
 
 It also handles trickier cases automatically: agents with multiple versions, agents with no custom connection (it just checks the standard ones), and connections built outside the build-custom-connection skill (warns instead of crashing).
 
+## Quick Start: Testing your connection end-to-end
+
+The diagnose skill checks that your metadata looks correct. The test skill goes further — it sends a real message through the Agent API and shows you what came back.
+
+```bash
+cd custom-connections-skill
+claude
+```
+
+Then type:
+
+```
+/project:test-connection
+```
+
+The skill asks five plain-English questions:
+1. **What's your org alias?** (e.g., `my-org`)
+2. **What's your agent's name?** (its developer name — same as the diagnose skill)
+3. **Which connection do you want to test?** (it lists what it found and lets you pick one)
+4. **Do you have an External Client App set up for the Agent API?** (if no, it walks you through the setup — see below)
+5. **What message do you want to send?** (it suggests a default that's likely to trigger a structured response)
+
+The skill is **read-mostly** — the only org-side change is a temporary session it creates and cleans up. Safe to run on production.
+
+> **Important:** This skill needs your agent to be **active** (the opposite of the build and diagnose skills, which need it deactivated). If you just deactivated your agent to run diagnose-connection, reactivate it before running this test. The skill will tell you if you forgot.
+
+### What the report looks like
+
+```
+=== Connection Test Report: Customer_Support_Agent ===
+
+▶ Top priority: ✓ Connection works end-to-end. Agent responded using
+  AcmePortalChoices_ACME01 format with 4 choices.
+
+PRE-FLIGHT
+  ✓ Salesforce CLI installed
+  ✓ Org 'my-org' connected
+  ✓ Agent 'Customer_Support_Agent' is active (v2)
+  ✓ OAuth credentials valid (token issued)
+  ✓ All required scopes present
+  ✓ Agent API runtime available
+
+TEST SEQUENCE
+  ✓ Session created
+  ✓ Turn 1: "Show me my plan options" → AcmePortalChoices_ACME01
+  ✓ Response shape valid
+
+WHAT THE AGENT RETURNED
+  Format: AcmePortalChoices_ACME01
+  Message: "Here are the plans we offer:"
+  Choices:
+    1. Starter Plan ($5/month)
+    2. Basic Plan ($10/month)
+    3. Professional Plan ($25/month)
+    4. Enterprise Plan ($50/month)
+
+=== Summary: 9 passed, 0 warnings, 0 issues ===
+```
+
+A copy is also saved as JSON to `/tmp/test-connection-report.json` for use in CI/CD pipelines.
+
+### Multi-turn conversations
+
+After each response, the skill asks "Want to send another message, or are you done?" If your first message didn't trigger a structured response (the agent might ask a clarifying question first), keep going. The skill caps the conversation at 5 turns and grades the last meaningful response.
+
+### Don't have an External Client App?
+
+The skill walks you through setup. Six steps in the Salesforce Setup UI — no command-line work, no XML editing. Takes about 10 minutes the first time, never again. Just answer "no" to question 4 above and follow along.
+
 ## What does success look like?
 
 After deploying, your app receives structured JSON instead of plain text — so you can render it as cards, buttons, carousels, or whatever UI your app supports.
@@ -245,7 +315,7 @@ The [`examples/`](./examples/) directory includes:
 
 - **[`examples/acme-portal/`](./examples/acme-portal/)** — Pre-generated metadata for a fictional client. Browse this to see exactly what the skill produces, or deploy it to a sandbox to test the full flow.
 - **[`examples/demo-response.html`](./examples/demo-response.html)** — Open in a browser to see what structured responses look like when rendered. Shows all format types side by side.
-- **[`examples/verify-connection.sh`](./examples/verify-connection.sh)** — Quick script to verify your custom connection works. Starts an Agent API session with `surfaceType: Custom` and prints "CONNECTED" or "FAILED."
+- **[`examples/verify-connection.sh`](./examples/verify-connection.sh)** — Bash script that starts an Agent API session and prints "CONNECTED" or "FAILED." Useful for CI/CD smoke tests where you want a one-line shell check. For interactive testing with a friendly report, use `/project:test-connection` instead.
 
 ```bash
 ./examples/verify-connection.sh <org-alias> <client-id> <client-secret> <agent-developer-name>
@@ -253,14 +323,18 @@ The [`examples/`](./examples/) directory includes:
 
 ## Testing
 
+**Easiest path — run the test skill:** `/project:test-connection` walks you through everything. It verifies the connection end-to-end, helps you set up the External Client App if you don't have one, and shows the agent's response in plain English. Recommended for first-time setup and ongoing verification.
+
 **Verify deployment:** Open Agent Builder → Connections tab. Your custom connection should appear in the list. This confirms the metadata is deployed correctly.
 
-**Quick check via script:** Run `examples/verify-connection.sh` to confirm the Agent API accepts your custom surface. Prerequisites:
+**For CI/CD:** Run `examples/verify-connection.sh` (one-line bash check) or feed `/tmp/test-connection-report.json` (from the test skill) into your pipeline. Both surface the same underlying API call.
+
+**Prerequisites for any runtime testing:**
 - An External Client App (ECA) with OAuth scopes: `api`, `refresh_token`, `chatbot_api`, `sfap_api`
 - Client Credentials Flow enabled with a Run As user that has "API Only access" permission
-- See [GUIDE.md](./GUIDE.md#step-8-use-the-custom-connection-via-agent-api) for full ECA setup steps.
+- See [GUIDE.md](./GUIDE.md#step-8-use-the-custom-connection-via-agent-api) for full ECA setup steps. The test skill walks you through this if you don't have one yet.
 
-**Agent API (required for structured responses):** Start a session with `"surfaceConfig": {"surfaceType": "Custom"}` in your session creation call. The Agent API injects your response formats as tools and surface instructions into the LLM context. See [GUIDE.md](./GUIDE.md) for full API examples.
+**Agent API (the underlying mechanism):** Start a session with `"surfaceConfig": {"surfaceType": "Custom"}` in your session creation call. The Agent API injects your response formats as tools and surface instructions into the LLM context. See [GUIDE.md](./GUIDE.md) for full API examples.
 
 **Note:** The Agent Builder preview pane does NOT support custom connections. It always uses the default channel. You must test structured responses via the Agent API.
 

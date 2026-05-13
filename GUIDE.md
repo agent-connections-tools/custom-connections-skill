@@ -492,6 +492,74 @@ The diagnostic catches misconfiguration, not platform corruption. A few specific
 
 ---
 
+## Step 11: Testing your connection end-to-end
+
+The diagnostic in Step 10 confirms your metadata is correct. The test skill confirms your agent **actually responds** when called through the Agent API:
+
+```
+/project:test-connection
+```
+
+It sends a real message through the connection, shows you what came back, and tells you in plain English whether everything works. The skill is **read-mostly** — it creates a temporary Agent API session and cleans it up at the end. Safe to run on production orgs.
+
+> **State requirement is the OPPOSITE of build and diagnose.** Both `build-custom-connection` and `diagnose-connection` need your agent to be **deactivated**. `test-connection` needs your agent to be **active** — you can't send messages to a deactivated agent. The skill catches this at pre-flight and tells you what to do, with an explicit reference to diagnose-connection so you don't get whipsawed between the two.
+
+### What it does
+
+The test skill walks you through 13 steps under the hood, but you only see five questions:
+
+1. **Org alias** — same as the other skills.
+2. **Agent's developer name** — same as the other skills.
+3. **Which connection to test** — it lists every connection on your agent and lets you pick one (or "all").
+4. **Do you have an External Client App for the Agent API?** — if no, it walks you through setup (the same 6 steps from Step 8 above, in conversational form).
+5. **What message do you want to send?** — it suggests a default likely to trigger a structured response. You can override.
+
+After your answer to question 5, the skill:
+- Verifies the environment (CLI, org connection, API version, agent active status, ECA OAuth scopes, Agent API runtime availability)
+- Creates a session with the right `surfaceType` for your chosen connection
+- Sends your message
+- Shows the agent's response in a human-readable format (numbered choices, image cards, time picker, or plain text — whatever the agent returns)
+- Asks "Want to send another message, or are you done?" — multi-turn is opt-in, capped at 5 turns
+- Cleans up the session when you're done
+
+### Reading the report
+
+The output mirrors the diagnose skill's report:
+
+| Section | What it means |
+|---|---|
+| **Top result** | One-line verdict at the top. "Connection works end-to-end" or the highest-priority fix. |
+| **PRE-FLIGHT** | Environment checks. If any fail, the skill stops here. |
+| **TEST SEQUENCE** | Session creation, every message you sent, the agent's response. |
+| **WHAT THE AGENT RETURNED** | The structured response rendered visually. For text choices: a numbered list. For image cards: a labeled grid. For time picker: a labeled time field. For plain text: just the message. |
+| **WARNINGS / ISSUES** | Things to know about (warning) or things to fix (issue), each with **What this means** and **How to fix**. |
+
+A copy of the report is also saved as JSON at `/tmp/test-connection-report.json` for use in CI/CD pipelines. It includes the parsed response payload so you can assert on the shape (e.g., "must return at least 3 choices").
+
+### Multi-turn: when one message isn't enough
+
+Often the first message you send doesn't trigger a structured response. The agent might ask a clarifying question first ("Which type of account are you interested in?") and then return choices on the next turn. The test skill supports this — after each response, it asks "Want to send another message, or are you done?"
+
+The cap is 5 turns. If you reach it without triggering a structured format on a custom connection, the skill warns you that no format was triggered and suggests you check your topic instructions.
+
+The report grades only the **last meaningful structured response** — not the entire conversation. The JSON output captures the final response, not every turn.
+
+### What the test skill can't tell you
+
+- **Phantom format corruption.** Same blind spot as the diagnose skill. If the connection passes both diagnose-connection and test-connection but still doesn't work in your real client, redeploy the response format with a fresh name.
+- **Visual rendering quality.** The skill validates that the agent returns the right structured JSON. How your client app *renders* that JSON (the UI for buttons, cards, etc.) is your responsibility — see [`examples/demo-response.html`](./examples/demo-response.html) for an example renderer.
+- **Multi-region / multi-org behavior.** The skill tests one session against one org. If you need to verify the same connection works across regions, run the skill against each org separately.
+- **Long-running RAG topics.** The skill sets a 90-second timeout on each message and shows a "waiting for response..." indicator after 5 seconds of silence. If your agent has knowledge-heavy topics that consistently take longer, increase the timeout in your client app and don't use the test skill as the source of truth for production latency.
+
+### When to run it
+
+- **After deploying a new custom connection.** Confirm the agent actually responds with structured output, not just that the metadata deployed.
+- **After changing topic instructions or adding actions.** Verify the agent still triggers the right format.
+- **Before pointing your client app at a new org.** Catch ECA setup issues before they become user-facing bugs.
+- **In CI/CD pipelines.** Use the JSON output (or `examples/verify-connection.sh` for a simpler bash check) to fail builds when the runtime path regresses.
+
+---
+
 ## Troubleshooting
 
 | Issue | Resolution |
