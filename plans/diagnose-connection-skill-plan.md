@@ -1,4 +1,4 @@
-# diagnose-connection — Skill Plan (v9)
+# diagnose-connection — Skill Plan (v10 — final)
 
 **Author:** Abhi Rathna
 **Date:** 2026-05-12
@@ -71,10 +71,10 @@ These are real failure modes from testing. Every one produced a confusing or sil
 
 Before running the full diagnosis, the skill verifies:
 
-1. **Salesforce CLI is installed** — `sf --version` must succeed
-2. **Org is authenticated** — `sf org display --target-org $ORG_ALIAS` must succeed
-3. **Org API version supports Agent metadata** — check that the org's API version is >= 62.0 (when GenAiPlannerBundle, AiSurface, and AiResponseFormat were introduced). Detected via `sf org display` output. If too old, stop early with a clear message: "Your org's API version (vXX.0) doesn't support Agent metadata. Minimum required: v62.0." Also check for a `sfdx-project.json` in the user's current working directory (not the skill's own directory) with a pinned `sourceApiVersion` — if pinned below 62.0, warn: "Org supports v62.0+ but your project pins vXX.0 in sfdx-project.json — this may cause retrieve failures."
-4. **User has permission to retrieve metadata** — the initial `sf project retrieve start` will fail if the user's profile doesn't have metadata access. Catch this error specifically and report: "Could not retrieve agent metadata. Check that your user profile has the 'Modify Metadata Through Metadata API Functions' permission."
+1. **Salesforce CLI is installed** — `sf --version` must succeed. If missing: "→ Fix: Install with `brew install sf` or `npm install -g @salesforce/cli`."
+2. **Org is authenticated** — `sf org display --target-org $ORG_ALIAS` must succeed. If expired: "→ Fix: Run `sf org login web --alias <alias>` to re-authenticate."
+3. **Org API version supports Agent metadata** — check that the org's API version is >= 62.0 (when GenAiPlannerBundle, AiSurface, and AiResponseFormat were introduced). Detected via `sf org display` output. If too old, stop early: "Your org's API version (vXX.0) doesn't support Agent metadata. Minimum required: v62.0. → Fix: Upgrade your org or use a Developer Edition with a newer API version." Also check for a `sfdx-project.json` in the user's current working directory (not the skill's own directory) with a pinned `sourceApiVersion` — if pinned below 62.0, warn: "Org supports v62.0+ but your project pins vXX.0 in sfdx-project.json — this may cause retrieve failures. → Fix: Update sourceApiVersion in sfdx-project.json to 62.0 or higher."
+4. **User has permission to retrieve metadata** — the initial `sf project retrieve start` will fail if the user's profile doesn't have metadata access. Catch this error specifically and report: "Could not retrieve agent metadata. → Fix: Check that your user profile has the 'Modify Metadata Through Metadata API Functions' permission in Setup > Profiles."
 
 If any pre-flight check fails, stop and report the issue. Don't continue to the main checks.
 
@@ -155,7 +155,7 @@ Agent Builder directly.
 {
   "$schema": "diagnose-connection-v1",
   "agent": "Agentforce_Service_Agent",
-  "version": "v2",
+  "bundleVersion": "v2",
   "timestamp": "2026-05-12T14:30:00Z",
   "passed": 7,
   "warnings": 1,
@@ -248,7 +248,7 @@ The skill prompt instructs Claude to:
 5. List connections found, let user pick which to diagnose (or "all")
 6. Check bundle-level health (versions, activation, topic references, API version consistency)
 7. For each surface: check surfaceType, adaptiveResponseAllowed, format references, instructions
-8. For each surface with format references: validate format existence via dry-run deploy (using real surface metadata from bundle)
+8. For each surface with format references: validate format existence via dry-run deploy (batch all formats in one dry-run using real surface metadata from bundle; fall back to individual dry-runs only if batch fails with a format-specific error)
 9. For each response format: JSON.parse the `<input>` field to catch malformed schemas
 10. Compile results into both output formats (markdown to terminal, JSON to file)
 
@@ -260,6 +260,27 @@ The skill prompt instructs Claude to:
 - **Retrieve fails with unknown error:** Show the raw error and suggest checking org connectivity
 - **Dry-run deploy fails with unexpected error:** Report as a warning, not a failure (the format may exist but something else is wrong)
 - **Mid-run permission failure:** If a check hits a permission wall after pre-flight passed, mark that check as "skipped" with reason, continue remaining checks
+
+### Skill Prompt Structure
+
+The `.claude/commands/diagnose-connection.md` file will follow this section outline:
+
+```
+# Diagnose Agent Connections
+## Your role
+## Step 1: Gather input (org alias, agent name)
+## Step 2: Pre-flight checks (CLI, auth, API version, permissions)
+## Step 3: Retrieve and parse the bundle
+## Step 4: Run bundle-level checks
+## Step 5: Run connection-level checks (per surface)
+## Step 6: Validate response formats via dry-run deploy
+## Step 7: Compile and display results
+## Output templates (markdown + JSON)
+## Error handling rules
+## Important rules
+```
+
+Each step maps 1:1 to the validation logic above. Steps 4-6 produce check results with status (passed/warning/failed), detail, and fix text. Step 7 assembles them into the two output formats.
 
 ### Where It Lives
 
@@ -317,7 +338,7 @@ Skill command is `/project:diagnose-connection`. Both skills in this repo use `/
 | 4 | **Dry-run deploy** for format validation | Tooling API doesn't support AiResponseFormat. Investigated and confirmed 2026-05-12. Dry-run is the only option. |
 | 5 | **Two output formats** (markdown + JSON) | Markdown for terminal, JSON for CI/CD. HTML deferred to v2 — most people paste markdown into Slack. |
 | 6 | **Single-agent scope** | Multi-agent audit is v2. Keeps v1 focused and the prompt manageable. |
-| 7 | **`/project:diagnose-connection`** namespace | Migrates to `/agentforce:` with the full skill family when the namespace is adopted. |
+| 7 | **`/project:diagnose-connection`** namespace | Stay on `/project:` until the skill family migrates as a unit. Premature namespace adoption just creates a rename tax later. |
 | 8 | **Direct agent name input** (no wildcard listing) | `GenAiPlannerBundle:*` retrieves full bundle contents for every agent — not lightweight. User provides name directly, same pattern as `build-custom-connection`. |
 | 9 | **`defaultVersion` field** for version detection | Falls back to highest-numbered version if field is absent. Explained in output when multiple versions exist. |
 | 10 | **Pre-flight checks** before diagnosis | Catches CLI, auth, API version, and permission issues early with clear error messages instead of cryptic failures mid-run. |
@@ -355,3 +376,4 @@ Skill command is `/project:diagnose-connection`. Both skills in this repo use `/
 - **v7 (2026-05-12):** Sixth review — pre-flight now checks `sfdx-project.json` pinned API version, batch dry-runs are the default path (not conditional).
 - **v8 (2026-05-12):** Seventh review — pre-flight checks CWD sfdx-project.json not skill directory, testing estimate bumped to 4.5h (total 12h), fixed open question #2 phrasing to match actual question, added batch dry-run error heuristic (format-name vs surface-level errors).
 - **v9 (2026-05-12):** Eighth review + empirical validation — both open questions validated against test-org (dry-run succeeds on existing surface, BotDefinition names match bundle names). Added "top priority" line to report output. Corruption blind spot called out prominently in "What It Does NOT Do". Namespace decision documented (`/project:` now, migrate together later). All open questions resolved.
+- **v10 (2026-05-12):** Ninth review (final polish) — added "→ Fix:" lines to all pre-flight error messages for consistent UX, added skill prompt section outline (11 headers mapping 1:1 to validation logic), renamed JSON `version` to `bundleVersion` to avoid ambiguity with `$schema`, added batching reference to validation step 8, aligned decision #7 framing with namespace section.
