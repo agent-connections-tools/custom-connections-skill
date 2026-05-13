@@ -58,16 +58,40 @@ EOF
 Retrieve the agent bundle:
 
 ```bash
-cd "$WORK_DIR" && sf project retrieve start --metadata "GenAiPlannerBundle:$AGENT_NAME" --target-org $ORG_ALIAS --output-dir retrieved/
+# In the single-version case, the bundle name equals the agent name.
+# This is reassigned in the multi-version fallback below if needed.
+BUNDLE_NAME="$AGENT_NAME"
+cd "$WORK_DIR" && sf project retrieve start --metadata "GenAiPlannerBundle:$BUNDLE_NAME" --target-org $ORG_ALIAS --output-dir retrieved/
 ```
 
 **Important:** The retrieve returns exit code 0 even when the agent isn't found — it shows `Status: Succeeded` with a Warnings table. Don't rely on the exit code. After the retrieve, always verify the bundle was actually created:
 
 ```bash
-ls retrieved/genAiPlannerBundles/$AGENT_NAME/$AGENT_NAME.genAiPlannerBundle 2>/dev/null
+ls retrieved/genAiPlannerBundles/$BUNDLE_NAME/$BUNDLE_NAME.genAiPlannerBundle 2>/dev/null
 ```
 
-If the file doesn't exist (or the output contains "cannot be found"):
+**Multi-version fallback:** If the bundle file doesn't exist, the agent may have versioned bundles. Agents with multiple versions store each version as a separate bundle named `<AgentName>_v<N>` (e.g., `BCU_Test_v1`, `BCU_Test_v2`). To handle this:
+
+1. List all GenAiPlannerBundle metadata and look for entries matching `${AGENT_NAME}_v*`:
+   ```bash
+   sf org list metadata --metadata-type GenAiPlannerBundle --target-org $ORG_ALIAS 2>/dev/null | grep "${AGENT_NAME}_v"
+   ```
+
+2. If versioned bundles exist, find the active version:
+   ```bash
+   sf data query --query "SELECT VersionNumber, Status FROM BotVersion WHERE BotDefinition.DeveloperName = '$AGENT_NAME' ORDER BY VersionNumber" --target-org $ORG_ALIAS
+   ```
+
+3. Retrieve the active version's bundle (or the highest version number if none is active):
+   ```bash
+   # Example: if active version is v2, retrieve BCU_Test_v2
+   BUNDLE_NAME="${AGENT_NAME}_v${ACTIVE_VERSION}"
+   cd "$WORK_DIR" && sf project retrieve start --metadata "GenAiPlannerBundle:$BUNDLE_NAME" --target-org $ORG_ALIAS --output-dir retrieved/
+   ```
+
+4. After this step, **`$BUNDLE_NAME` is always the correct identifier for retrieved-bundle file paths and metadata references.** In the single-version case it equals `$AGENT_NAME`; in the multi-version case it equals `${AGENT_NAME}_v${ACTIVE_VERSION}`. Use `$BUNDLE_NAME` for every file path and metadata operation from this point on. Use `$AGENT_NAME` only for user-facing display, BotDefinition / BotVersion SOQL queries, and the `<masterLabel>` extraction from the bundle XML.
+
+If no versioned bundles exist either:
 - Run `sf data query --query "SELECT DeveloperName FROM BotDefinition" --target-org $ORG_ALIAS` to show available agents
 - Ask the user to pick the correct one
 
@@ -89,18 +113,18 @@ Save these lists — you'll need them to verify connections exist.
 These checks apply to the whole agent, not individual connections.
 
 **Check: Agent retrieved**
-- passed → "Agent found"
+- passed → "Agent found" (if multi-version fallback was used, mention: "Agent found — this agent has multiple versions, checking version N")
 - failed → "Couldn't find an agent with that name" — show available agents and ask the user to try again
 
 **Check: Agent activation status**
-- Run: `sf data query --query "SELECT DeveloperName, Status FROM BotVersion WHERE BotDefinition.DeveloperName = '$AGENT_NAME'" --target-org $ORG_ALIAS`
-- If any version has Status = 'Active' → warning: "Your agent is currently active. You'll need to deactivate it before you can fix any issues. Go to **Setup → Agents → select your agent → Deactivate**."
+- Run: `sf data query --query "SELECT DeveloperName, VersionNumber, Status FROM BotVersion WHERE BotDefinition.DeveloperName = '$AGENT_NAME' ORDER BY VersionNumber" --target-org $ORG_ALIAS`
+- If any version has Status = 'Active' → warning: "Your agent is currently active (version N). You'll need to deactivate it before you can fix any issues. Go to **Setup → Agents → select your agent → Deactivate**."
 - If no active versions → passed: "Agent is deactivated (safe to make changes)"
 
 **Check: Version**
-- Look for a `defaultVersion` field in the bundle metadata
-- If only one version → passed
-- If multiple versions → warning: tell the user which version is active and which is newest
+- Use the BotVersion query results from the activation check above
+- If only one version → passed: "Single version found — no version conflicts"
+- If multiple versions → warning: tell the user how many versions exist, which one is active, and that the skill is checking the active version's bundle. Example: "This agent has 3 versions (v1, v2, v3). Version 2 is active — checking that one. Note: if you recently made changes to a newer inactive version, those won't be checked here."
 
 **Check: API version**
 - Look for an `<apiVersion>` tag inside the bundle XML (not the temp sfdx-project.json — that's the skill's own scaffolding)

@@ -37,8 +37,14 @@ Then it runs checks and shows a report.
   - Connections: Messaging, CustomerWebClient, Telephony, ServiceEmail, MicrosoftTeams (custom), Test (standard)
   - Response formats: only `TeamsText` exists (doesn't follow `build-custom-connection` naming pattern)
   - Status: v1 is Inactive
-- **Agents without bundles (retrieve will fail):** `Copilot_for_Salesforce`, `TestAgent3`, `Soap_Demo`, `testTelephony`, `testAgent`, `BCU_Test`, `VoiceAgentTest`
-- **All agents have a single version (v1).** No multi-version agents exist in this org.
+- **Multi-version agent:** `BCU_Test` (display name: "BCU Test")
+  - BotVersions: v1 (Inactive), v2 (Active)
+  - Bundle names: `BCU_Test_v1`, `BCU_Test_v2` (NOT `BCU_Test` — the bare name fails to retrieve)
+  - v2 connections: BaxterCreditUnion_BCU01 (custom)
+  - v1 connections: AcmePortal_AcmePortal01 (custom) — different surface than v2
+  - Status: v2 is Active
+- **Agents without bundles (retrieve will fail):** `Copilot_for_Salesforce`, `TestAgent3`, `Soap_Demo`, `testTelephony`, `testAgent`, `VoiceAgentTest`
+  - Note: `TestAgent3` and `Soap_Demo` have versioned BotVersion records but their bundles use versioned names (e.g., `Soap_Demo_v6`). The skill's multi-version fallback would handle these, but they're not primary test agents.
 
 ## Check inventory
 
@@ -99,6 +105,29 @@ Expected: **12 passed, 1 warning, 0 issues** (+ 1 skipped)
 | — | API version consistency | **skipped** | No `<apiVersion>` tag in bundle |
 
 Method B (dry-run) is skipped because Method A found 0 format names — there's nothing to validate. The real AiSurface in the org may reference TeamsText, but the skill can't retrieve AiSurface XML (CLI blocks it), so it can only work with what Method A finds.
+
+### BCU_Test — "all" connections (multi-version agent)
+
+Expected: **7 passed, 2 warnings, 0 issues** (+ 1 skipped)
+
+| # | Check | Expected | Notes |
+|---|-------|----------|-------|
+| 1 | Agent retrieved | passed | Multi-version fallback: bare name fails, retrieves `BCU_Test_v2` (active version) |
+| 2 | Activation status | **warning** | v2 is Active |
+| 3 | Version | **warning** | 2 versions found — v1 Inactive, v2 Active. Skill checks v2. |
+| 4 | Custom connection exists | passed | BaxterCreditUnion_BCU01 in org |
+| 5 | Adaptive responses | passed | Enabled |
+| 6 | Only one custom connection | passed | |
+| 7 | No duplicate connections | passed | |
+| 8 | Response formats found | passed | 2 found by naming convention |
+| 9 | Response formats validated | passed | Dry-run succeeded |
+| — | JSON schema check | **skipped** | No local .aiResponseFormat files |
+| — | API version consistency | **skipped** | No `<apiVersion>` tag in bundle |
+
+Key differences from single-version agents:
+- The skill first tries `GenAiPlannerBundle:BCU_Test` (fails silently), then discovers versioned bundles via `sf org list metadata`, then retrieves `BCU_Test_v2` (the active version)
+- The version check now reports a **warning** because multiple versions exist
+- v1 and v2 have DIFFERENT custom connections (v1: AcmePortal_AcmePortal01, v2: BaxterCreditUnion_BCU01) — the skill only checks v2's connections
 
 **About topic/plugin references:** The bundle contains `localTopicLinks` and `localTopics` entries (e.g., ProductRecommendations_BCU01, TEst_16jSB000000U9KP). These are NOT checked by this skill — topic and plugin reference validation was removed because it's not connection-related. If a reviewer asks why these aren't in the report, that's by design.
 
@@ -305,6 +334,31 @@ cd examples/acme-portal && /project:diagnose-connection
 
 ---
 
+### Scenario 10: Multi-version agent
+
+**Run:** `/project:diagnose-connection` with org `test-org`, agent `BCU_Test`, choose "all"
+
+**Context:** `BCU_Test` has 2 versions (v1 Inactive, v2 Active). The bundle is NOT retrievable by bare name — `GenAiPlannerBundle:BCU_Test` returns "cannot be found" (exit code 0, "Succeeded" status with warning). The skill must fall back to versioned bundle names.
+
+**Expected result:**
+- Initial retrieve of `GenAiPlannerBundle:BCU_Test` fails (returns "Succeeded" with warning)
+- Skill searches for versioned bundles: finds `BCU_Test_v1` and `BCU_Test_v2`
+- Skill queries BotVersion to find that v2 is Active
+- Skill retrieves `GenAiPlannerBundle:BCU_Test_v2`
+- Agent-level checks: retrieved (with multi-version note), activation warning (v2 is Active), version warning (2 versions exist)
+- Custom connection checks against v2's connection (BaxterCreditUnion_BCU01): exists, adaptive responses on, one custom, no duplicates, 2 formats found and validated
+- Total: 7 passed, 2 warnings, 0 issues, 1 skipped (see check inventory for BCU_Test)
+
+**Review for (watch Claude's tool calls carefully):**
+- Does the skill detect the initial retrieve failure despite "Succeeded" status?
+- Does it search for versioned bundles (look for `sf org list metadata --metadata-type GenAiPlannerBundle` in the tool calls)?
+- Does it pick the ACTIVE version (v2), not just the highest version number?
+- Does the report mention that this is a multi-version agent?
+- Does the version check produce a warning explaining the version situation?
+- Are the checks run against v2's connections (BaxterCreditUnion_BCU01), NOT v1's (AcmePortal_AcmePortal01)?
+
+---
+
 ## Things to specifically review
 
 ### 1. Language and tone
@@ -346,7 +400,7 @@ cd examples/acme-portal && /project:diagnose-connection
 - **Format naming convention assumes build-custom-connection pattern** — if formats were created manually with different naming, Method A won't find them. Method B (dry-run) would still catch missing formats if we knew their names.
 - **One custom connection per agent** — this is a platform limit. The skill flags it as an issue if multiple are found.
 - **Local JSON schema check depends on CWD** — only works if the user runs the skill from a directory containing `.aiResponseFormat` source files.
-- **Multi-version bundle warning is untestable** — all agents in test-org have a single version (v1). The version mismatch warning (plan says: "Agent has N versions — active: vX, most recent: vY") can't be triggered. To test this, you'd need to create an agent with multiple versions in the org. Acknowledged as untested.
+- **Multi-version agents use versioned bundle names** — agents with multiple versions (like `BCU_Test`) can't be retrieved by bare name. The skill falls back to searching for `<AgentName>_v<N>` bundles. This is tested in Scenario 10 with `BCU_Test` (v1 Inactive, v2 Active). Note: v1 and v2 may have different connections — the skill only checks the active version's connections.
 - **Batch dry-run fallback (Scenario 8) is tested via reasoning only** — Option A confirms the error message is parseable and names the missing format. Option B (deploying a broken surface as a permanent test fixture) would allow end-to-end verification but hasn't been set up. The fallback logic (batch fails → individual dry-runs) is validated by confirming the error output structure, not by running the full fallback path.
 - **Mid-run permission failure is untestable on demand** — the plan says "mark that check as skipped with reason, continue remaining checks." This requires a user profile that passes pre-flight but lacks specific metadata permissions. Can't be reliably triggered in test-org where the user has full admin access. Acknowledged as untested.
 - **sfdx-project.json version check is never exercised** — the custom-connections-skill repo has no `sfdx-project.json` in its root, so pre-flight check 3b always skips. To test the "pinned version too low" warning, you'd need to run the skill from a directory that has a `sfdx-project.json` with `sourceApiVersion` below 62.0.
