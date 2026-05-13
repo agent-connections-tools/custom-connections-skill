@@ -223,14 +223,45 @@ The before/after structure is intentional — it makes the diff explicit and giv
 
 ## Non-Technical UX Requirements
 
-Same bar as the other skills. Specifically:
+Same accessibility bar as `build-custom-connection`, `diagnose-connection`, and `test-connection`. The skill must be usable by Salesforce Admins who have never edited XML, written a curl command, or run a Salesforce CLI command before. Specifically:
 
-- **Plain English everywhere.** No "AiSurface", "AiResponseFormat", "plannerSurfaces", "merge XML" in user-facing output. Translate to: "your connection", "your response format", "your agent's configuration".
-- **One question at a time.** 4 questions, never dumped together.
-- **Show before/after explicitly.** The user must see "you currently have 2 formats; this will add a 3rd" before any deploy. No silent changes.
-- **Fix instructions use Setup → navigation paths.** Same standard as build/diagnose.
-- **Brief status updates** during long operations: "Pulling your current connection state...", "Generating new format file...", "Deploying...".
-- **README and GUIDE updates required.** New "Quick Start: Updating a connection" section in README; new Step 12 in GUIDE.
+**Language:**
+- **Plain English everywhere.** No metadata jargon in user-facing messages. Don't say `plannerSurfaces`, `AiSurface`, `AiResponseFormat`, `responseFormats`, `surfaceConfig`, `GenAiPlannerBundle`, `metadata-dir`, `dry-run`, "merge XML", or "regenerate from scratch." Translate to: "your connection", "your response formats", "your agent's configuration", "what you currently have", "what we're about to add".
+- **Setup → navigation paths**, not URLs or API endpoints. "Setup → Agents → select your agent → Deactivate" instead of "deactivate the BotVersion."
+- **Action verbs in fix instructions.** "Click Deactivate" not "set the Status field to Inactive."
+- **Friendly format names.** Always say "Text Choices" / "Image Cards" / "Time Picker" / "Custom JSON" — never the developer-name format like `AcmePortalChoices_ACME01` in the format-picking UI (the skill maps friendly names to developer names internally).
+
+**Conversation flow:**
+- **One question at a time.** 4 questions, never dumped together. Wait for each answer before asking the next.
+- **Run commands without asking permission.** Don't say "shall I retrieve your bundle?" — just retrieve it and show the result.
+- **Help the user find inputs they don't know.** Same as the trio: when asking for the agent name, offer Setup → Agents OR `sf data query` as ways to find it.
+- **Show what's currently there before asking what to add.** The user picks "what to add" from a list that's already filtered by what they don't have. If the connection has Text Choices and Image Cards, the format-picker offers Time Picker and Custom JSON only (not the two they've already deployed). This is friendlier than asking the user to pick anything and then erroring on duplicates.
+
+**Show before/after — the central UX commitment:**
+- The user MUST see what's currently deployed before they confirm a change. No silent edits. The "CURRENT STATE" section appears in the report before "CHANGE" and "NEW STATE."
+- Frame it as "your connection currently has X — this will make it have Y." Never frame it as "deploying metadata."
+- If the user picks something that would clobber an existing format (Q3 deduplication), stop with: "Your connection already has Text Choices. Pick a different format type, or remove the existing one first using a future skill (not yet available)."
+
+**Error messages:**
+- Every error has **What this means** (1-sentence plain-English explanation) and **How to fix** (concrete step with Setup → navigation path or exact command).
+- Never show raw API errors or stack traces. Translate them. Example: instead of `"ConstraintViolationException: Bundle metadata is locked"`, show "Your agent is currently active, so changes can't be deployed. Go to Setup → Agents → select your agent → click Deactivate, then run this skill again."
+- The deactivated-agent message references the workflow explicitly: "Note: this is the same state requirement as `build-custom-connection` and `diagnose-connection`. After deploying, run `/project:test-connection` to verify the new format works (that skill needs the agent active)."
+
+**Transparency about what changed:**
+- The report's CURRENT STATE / CHANGE / NEW STATE sections make every modification explicit and auditable.
+- The "hand-edited surface fields will be lost" limitation is surfaced in the report **before deploy** as a yellow note: "I'm about to regenerate your connection's configuration. If you've manually edited it (e.g., custom description text), those changes will be lost. The response formats and core settings will stay intact." User can confirm or cancel.
+- Brief status updates during long operations: "Looking at what you currently have...", "Generating your new format file...", "Updating your connection...", "Confirming the deploy worked..."
+
+**Report:**
+- **Top priority line.** First line of the report — "Added X to your connection." or the highest-priority issue if something failed.
+- **Visual diff.** The CURRENT STATE / NEW STATE blocks make adds/changes obvious at a glance — no metadata field names, just numbered lists with friendly format names.
+- **Next steps section.** After every successful update, tell the user what to do next: reactivate the agent, run test-connection. Don't leave them stranded with "deploy succeeded" and no guidance on the workflow.
+
+**README and GUIDE updates:**
+- The skill must be added to `README.md` and `GUIDE.md` with the same treatment as the trio:
+  - **README:** A "Quick Start: Updating a connection" section between the build and diagnose sections (or after diagnose — wherever the iterate-on-existing flow logically belongs). Include the 4 questions the skill asks, a sample report showing the before/after diff, and what the skill does.
+  - **GUIDE:** A new step (likely Step 12) "Updating an existing connection" that explains the merge approach in plain language, what the report's three-state structure (current/change/new) means, what the skill can't preserve (hand-edits), and when to run it (after build, before testing the new format).
+- Both updates must use plain English — no metadata jargon — same standard as the existing chapters for build/diagnose/test.
 
 ---
 
@@ -365,14 +396,19 @@ Before declaring v1 ready to build:
 - [ ] Multi-version fallback works (same as diagnose-connection)
 
 **Non-technical UX (matches family bar):**
-- [ ] Plain English in all user-facing text
+- [ ] Plain English in all user-facing text — no metadata jargon (`plannerSurfaces`, `AiSurface`, `AiResponseFormat`, `surfaceConfig`, `metadata-dir`, etc.)
+- [ ] Friendly format names everywhere user-facing ("Text Choices" not `AcmePortalChoices_ACME01`)
 - [ ] One question at a time, never dumps all 4 inputs upfront
-- [ ] "What this means" + "How to fix" on every error
+- [ ] Format-picker filters out formats already on the connection (UX-level dedup, not just error-level)
+- [ ] "What this means" + "How to fix" on every error, with Setup → navigation paths
+- [ ] CURRENT STATE / CHANGE / NEW STATE sections in the report — before/after diff is explicit, not buried
+- [ ] Hand-edited-surface limitation surfaced **before** deploy as a confirm-or-cancel note
 - [ ] Top priority line at the start of the report
-- [ ] Friendly format type names (Text Choices, Image Cards, Time Picker)
-- [ ] Brief status updates during long operations
+- [ ] Next steps section at the end (reactivate agent, run test-connection)
+- [ ] Brief status updates during long operations ("Looking at what you currently have...", "Generating your new format file...")
+- [ ] Deactivated-agent error message references both `build-custom-connection`/`diagnose-connection` (same state) and `test-connection` (inverse state) so users see the workflow
 - [ ] README.md updated with "Quick Start: Updating a connection" section
-- [ ] GUIDE.md updated with new step explaining update-connection
+- [ ] GUIDE.md updated with new step explaining update-connection in plain language
 
 ---
 
@@ -380,3 +416,14 @@ Before declaring v1 ready to build:
 
 - **v1 (2026-05-13):** Initial draft. 4 inputs, stateful merge architecture, add-only scope for v1, custom-only, deactivated agent required. 4 open questions, 2 load-bearing.
   Reviewer correctly flagged that the bundle XML gives us the surface *name* but not its current `<responseFormats>` list — the AiSurface itself can't be retrieved by name through the CLI (registry limitation, same one diagnose-connection works around). Step 4 expanded to explain the Method A + Method B approach reused from `diagnose-connection`. New limitation surfaced: the skill regenerates the AiSurface XML from scratch each deploy, so any hand-edited fields on the existing surface XML are lost. Documented in "What It Does NOT Do" so users with hand-edited surfaces aren't surprised.
+
+  **Non-Technical UX Requirements section expanded** to match the bar set by the trio. Specific additions:
+  - **Format-picker filters out duplicates at the UX level** (don't let the user pick something that would error). Friendlier than the original "pick anything, error on duplicates" plan.
+  - **Hand-edited-surface limitation surfaced before deploy** as a confirm-or-cancel note, not buried in "What It Does NOT Do." Users with hand-edited surfaces see the warning before they commit.
+  - **Three-state report structure (CURRENT / CHANGE / NEW STATE)** — explicit before/after diff. No silent edits.
+  - **Friendly format names everywhere user-facing.** "Text Choices" not developer-name strings like `AcmePortalChoices_ACME01`.
+  - **Deactivated-agent error references the full workflow** — calls out the same-state pairing with build/diagnose AND the inverse-state with test-connection so users see the full picture.
+  - **Next steps section** at the end of the report — tells the user to reactivate and run test-connection. Don't leave them stranded.
+  - **README and GUIDE updates required** in the sign-off checklist, not optional.
+
+  Sign-off checklist expanded from 8 to 13 non-technical UX items.
