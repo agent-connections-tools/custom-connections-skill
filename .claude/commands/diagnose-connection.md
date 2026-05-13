@@ -210,7 +210,7 @@ If the batch dry-run fails:
 - For each file found, check that the `<input>` field contains valid JSON
 - If malformed → failed: "The JSON schema in '[filename]' has a syntax error: [detail]. Fix the JSON inside the `<input>` tag."
 - If valid → passed
-- If no local files found → this check is **skipped** (not passed). Don't include it in the pass count. Add an info note after the checklist: "I couldn't check your response format JSON schemas because there are no local .aiResponseFormat files in this directory. If you have the source files, run this skill from that directory."
+- If no local files found → this check is **skipped** (not passed, not a warning). Use status "skipped" in the JSON report. Don't include it in the pass or warning counts. Add an info note after the checklist: "I couldn't check your response format JSON schemas because there are no local .aiResponseFormat files in this directory. If you have the source files, run this skill from that directory."
 
 ## Step 6: Show the results
 
