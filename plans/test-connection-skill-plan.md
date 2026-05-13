@@ -76,7 +76,7 @@ Every one of these failure modes was hit during real testing of `build-custom-co
 | 4 | Run As user lacks permissions | Token works but session creation fails | Tell the user to verify the Run As user has 'API Only access' or appropriate profile. If pre-flight passes but session creation 401s, mention permset/profile as a likely cause. |
 | 5 | Wrong agent ID | 404 on session creation | Query BotDefinition first, validate the agent exists before attempting session. |
 | 6 | Agent is deactivated | Session creation fails or returns errors | Check BotVersion status before attempting. Surface "Your agent needs to be **active** to test it. If you just ran diagnose-connection or deployed changes, you may have deactivated it." |
-| 7 | Wrong field names in request body | 400 with field validation errors | Always use the validated request structure: `tz, surfaceType, botMode, conversationContext, surfaceConfig, richContentCapabilities, externalSessionKey, instanceConfig, streamingCapabilities, featureSupport, executionHistory, parameters, bypassUser, variables` (the 14 fields the API accepts — confirmed empirically). No `forceConfigEndpoint`, no `streamingConfig`, no `externalClientId`. |
+| 7 | Wrong field names in request body | 400 with field validation errors | Use only the 4 fields the skill actually sends: `externalSessionKey`, `instanceConfig`, `streamingCapabilities`, `surfaceConfig`. **No** `forceConfigEndpoint` (deprecated), `streamingConfig` (wrong name), or `externalClientId` (not in the schema). The full list of valid fields the API accepts is in the Validation Results section — refer to it there if a future skill version needs more fields. |
 | 8 | Agent API runtime not provisioned on org | 404 from `test.api.salesforce.com` | Detect orgfarm/dev-ed orgs, warn upfront: "Agent API runtime isn't typically available on Developer Edition or orgfarm orgs. Use a sandbox or production org." |
 | 9 | Response comes back as plain text on a Custom connection (no format triggered) | Hard to tell if connection works or if the agent just didn't pick a format | After sending a message, parse the `result[]` array. If empty AND the connection is Custom, report "agent responded with plain text — your connection works but the agent didn't trigger a structured format. Try a more targeted prompt or verify your topic instructions." If empty AND the connection is standard, this is expected behavior — don't warn. |
 | 10 | Long-response timeout (knowledge/RAG agents take 30-60s) | curl appears to hang with no output | Set curl `--max-time 90`. Show a "waiting for response..." message after 5s of silence so users don't think it's broken. Treat 408/timeout as a warning, not a hard failure. |
@@ -227,6 +227,8 @@ ISSUES (0)
 ```
 
 **2. JSON (saved to `/tmp/test-connection-report.json`):**
+
+> Note: `$schema: "test-connection-v1"` is the **output schema version**, not the plan version. This is the first release of the JSON output format. The plan version (v3) tracks the planning/review process, not the output schema. CI consumers should check `$schema` to detect future schema changes.
 
 ```json
 {
@@ -413,7 +415,7 @@ Same repo, same pattern.
 
 **Note:** Q1, Q2, Q8, Q9, Q10 are all resolved (see Validation Results below). The 3-4h "validate open questions" block from v2 is no longer needed. Effort is reduced from 15-17h (v2) to 14.5h.
 
-**Risk margin:** Add 2h if the schema validation logic surfaces edge cases when running against agents with multiple format types simultaneously.
+**Risk margin:** Add 2h if `test-org` doesn't already have an ECA configured for the runtime test pass — setting up an ECA from scratch (OAuth scopes, Client Credentials Flow, Run As user, etc.) is the most likely source of build-time slip. Verify ECA presence before counting hours.
 
 ---
 
@@ -430,7 +432,7 @@ Same repo, same pattern.
 | 7 | **Render structured responses in terminal** | The whole point is showing what the response looks like. Raw JSON alone isn't useful to admins. |
 | 8 | **Always end session on exit** | Don't leave orphaned sessions consuming org resources. Even on error, attempt cleanup. Wrap in try/finally pattern. |
 | 9 | **Suggest messages based on format type** | Reduces friction — the user doesn't have to guess what message will trigger a structured response. |
-| 10 | **Local-first schema fallback, structural validation only** | Match by triggered format name first. Validate structurally if matching local file found (required fields present, types correct, arrays non-empty — no JSON Schema library). If agent picked a format not in local files: skip validation, show raw JSON, don't fail. If no local files at all: skip entirely. Always report which file was used as schema source. |
+| 10 | **Local-first schema fallback, structural validation only (top-level fields only)** | Match by triggered format name first. Validate structurally if matching local file found: required top-level fields present (e.g., `message` exists as a string, `choices` exists as a non-empty array). **Do not recurse into array items** — checking that each `choices[i]` has `title`/`imageUrl`/`actionText` would require a JSON Schema library. The raw JSON display already lets the user eyeball nested structure. If agent picked a format not in local files: skip validation, show raw JSON, don't fail. If no local files at all: skip entirely. Always report which file was used as schema source. |
 | 11 | **One connection per test** | Multiple connections need separate sessions and the output gets confusing. Keep it focused. |
 | 12 | **Plain text on Custom = warning, on standard = expected** | Standard connections don't use response formats. `result: []` on a standard connection is normal — don't warn. On a Custom connection it's a warning ("agent didn't trigger a format"). |
 | 13 | **Same repo, same namespace** | `/project:test-connection`. Migrates to `/agentforce:` with the family later. |
@@ -514,6 +516,7 @@ Before declaring v3 final, confirm:
 - [ ] Always-cleanup pattern in skill prompt
 - [ ] `result[].value` JSON.parse step documented in rendering logic
 - [ ] No `externalClientId` in any sample request
+- [ ] **No surfaceType mapping table in the skill prompt** — surfaceType is pass-through (Decision #15). If a mapping table sneaks in (e.g., copy-pasted from earlier drafts), remove it. The bundle's raw value goes straight to `surfaceConfig.surfaceType`.
 
 **Non-technical UX (matches build/diagnose bar):**
 - [ ] Plain English in all user-facing text — no metadata jargon (plannerSurfaces, surfaceConfig, JWT, GenAiPlannerBundle, etc.)
@@ -534,6 +537,12 @@ Before declaring v3 final, confirm:
 - **v1 (2026-05-13):** Initial draft. 10 failure modes, 4-question input flow, 3-check test sequence, markdown + JSON output. Two open questions on session cleanup and secret handling.
 - **v2 (2026-05-13):** Reviewer pass. Updated Decision #10 from "no schema validation in v1" to "local-first schema fallback, structural validation only." Added Open Question #7: multi-turn vs single-message-per-run. State flip and always-cleanup confirmed.
 - **v3 (2026-05-13 — final):** Three rounds of reviewer feedback consolidated + all 10 open questions empirically validated against test-org. **Non-Technical UX Requirements section added** — same accessibility bar as build-custom-connection and diagnose-connection. Plain English, one question at a time, ECA walkthrough, friendly connection names, visual response rendering, README + GUIDE updates required. Sign-off checklist now includes 11 non-technical UX items.
+- **v3.1 (2026-05-13 — post-review polish):** Reviewer pass on v3 surfaced 5 clarifications. None blocking; all prevent misreads during build:
+  - **Failure mode #7** trimmed: skill prompt only references the 4 fields it actually sends. Full 14-field list lives in Validation Results, not the failure mode table.
+  - **JSON output `$schema`** clarified: schema version is `v1` (output format), plan version is v3 (planning process). They're independent.
+  - **Decision #10** clarified: structural validation is **top-level only** — don't recurse into array items. Checking each `choices[i]` would require a JSON Schema library.
+  - **Risk margin** redirected: real risk is ECA setup in test-org, not schema edge cases. Verify ECA presence before counting build hours.
+  - **Sign-off checklist**: added "no surfaceType mapping table in the skill prompt" — Decision #15 eliminated the mapping; if a table sneaks in via copy-paste, remove it.
   - **Multi-turn (Q7) resolved:** opt-in, 5-turn cap, single-response report semantics. ~1h impl (Decision #3 updated).
   - **Schema validation (Decision #10) refined:** match by triggered format name, skip validation if format not in local files (don't fail), report which file was used as schema source.
   - **surfaceType mapping eliminated:** Q1 + Q10 validation showed the API accepts all surface type values. Pass-through, no mapping. Decision #15 holds.
