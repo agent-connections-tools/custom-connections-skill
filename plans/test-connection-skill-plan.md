@@ -505,6 +505,10 @@ These came up during sign-off and belong in the skill prompt, not the plan:
 
 - **Future-proof the field list:** If the Agent API returns an "Unrecognized field" error the skill hasn't seen before, show the raw error verbatim and suggest the user check for Agent API changelog updates. Don't try to maintain a hardcoded valid-fields list in the skill prompt — let the API tell us when it changes. (The 14 fields documented in Validation Results are a snapshot, not a contract.)
 
+- **Don't expose the 14-field list to the user.** The list in the Validation Results section is defensive documentation for the skill author, not for end users. The skill always sends the correct 4 fields (`externalSessionKey`, `instanceConfig`, `streamingCapabilities`, `surfaceConfig`) — users never need to see the full list. If a user does hit an "Unrecognized field" error, fall back to the future-proofing rule above.
+
+- **Format name match must be exact.** When matching the triggered `SURFACE_ACTION__<formatName>` against local `.aiResponseFormat` files, use exact developer-name equality — not `startsWith` or `contains`. Otherwise `AcmePortalChoices_ACME01` would falsely match `AcmePortalChoicesWithImages_ACME01` and validate against the wrong schema. The skill should strip the `SURFACE_ACTION__` prefix from the type field, then match exactly against the basename of each local file (without the `.aiResponseFormat` extension).
+
 ---
 
 ## Reviewer Sign-off Checklist
