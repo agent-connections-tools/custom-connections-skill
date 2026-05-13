@@ -423,6 +423,75 @@ When the session is started with `"surfaceType": "Custom"`, the platform injects
 
 ---
 
+## Step 10: Diagnosing connections when something's wrong
+
+When a custom connection isn't working — the agent ignores it, responses come back as plain text, or a deploy failed — the fastest way to figure out what's broken is the diagnostic skill:
+
+```
+/project:diagnose-connection
+```
+
+It's read-only (never changes anything in your org) and produces a health report telling you exactly what's wrong and how to fix it. Safe to run on production orgs.
+
+### What it checks
+
+The diagnostic groups checks into three layers — environment, agent, and connection. Each is explained below in plain language so you can interpret the report without needing to know the underlying metadata.
+
+**Environment checks (run first):**
+- The Salesforce CLI is installed and your org alias is logged in
+- The org's API version is high enough to support custom connections (≥ v62.0)
+- Your user can retrieve metadata from the org
+
+If any of these fail, the skill stops here and tells you what to fix. The main checks don't run with a broken environment.
+
+**Agent-level checks:**
+- The agent's bundle exists and could be retrieved
+- Whether the agent is currently active (you'll need to deactivate it before changing anything)
+- How many versions exist (multiple versions can mean changes you made aren't being checked — the report says which version it's looking at)
+
+**Connection-level checks (run for each connection on the agent):**
+- For standard connections (Telephony, Web Chat, Email, Messaging): just confirms they're present. These are built into the platform — there's not much that can go wrong.
+- For your custom connection:
+  - Is the AiSurface deployed in the org?
+  - Is `adaptiveResponseAllowed` set to true? (Required for structured responses.)
+  - Is there only one custom connection on this agent? (Platform limit.)
+  - Are there any duplicate connection entries? (A common deploy mistake.)
+  - Are the response formats it references actually deployed in the org?
+  - Are the JSON schemas in your local response format files valid? (Only checked if you have the source files in your current directory.)
+
+### Reading the report
+
+The report has four sections:
+
+| Section | What it means |
+|---|---|
+| **Top priority** | The single most important fix. If you're going to do one thing, do this. |
+| **YOUR CONNECTIONS** | Every connection on the agent, with its checks listed underneath. |
+| **WARNINGS** | Things that won't break the connection but are worth knowing (e.g., agent is active, multiple versions exist). |
+| **ISSUES** | Things that are broken and need fixing (e.g., a referenced response format isn't deployed, adaptive responses are off). |
+
+Every warning and issue includes:
+- **What this means:** plain-English explanation of the problem
+- **How to fix:** the exact step to take (Setup → navigation path, or a specific command)
+
+A summary line at the bottom gives the final counts: `N passed, N warnings, N issues`. A copy of the same report is saved as JSON to `/tmp/diagnose-report.json` for use in CI/CD.
+
+### What it can't tell you
+
+The diagnostic catches misconfiguration, not platform corruption. A few specific things it doesn't detect:
+- **Phantom formats:** rarely, a response format can deploy with "Unchanged" status without actually being created in the org. The diagnostic's dry-run validation will say it exists when it doesn't. If everything passes but the connection still doesn't work, redeploy the format with a fresh name.
+- **Runtime issues:** the diagnostic checks the metadata, not the live Agent API behavior. To confirm end-to-end, use the `verify-connection.sh` script in [`examples/`](./examples/verify-connection.sh) or test via the Agent API directly.
+- **External Client App / OAuth setup:** the diagnostic doesn't verify your ECA configuration. If the Agent API rejects your token, that's a separate issue — see [Step 8](#step-8-use-the-custom-connection-via-agent-api) for ECA setup.
+
+### When to run it
+
+- **First thing when something stops working.** The diagnostic catches the common issues fast.
+- **After a deploy.** Confirm the wiring is correct.
+- **Before activating an agent in production.** Catch problems before users hit them.
+- **In CI/CD pipelines.** Use the JSON output to fail builds when checks regress.
+
+---
+
 ## Troubleshooting
 
 | Issue | Resolution |

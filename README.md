@@ -1,12 +1,21 @@
-# Custom Connections Skill for Agentforce
+# Custom Connections Skills for Agentforce
 
-A Claude Code skill that generates all the metadata you need to deploy a Custom Connection to your Agentforce agent. Answer 3 questions, get a deploy-ready package.
+Two Claude Code skills that take the pain out of working with Custom Connections in Agentforce — one to **build** them, one to **diagnose** them when something's wrong.
+
+## The two skills
+
+| Skill | What it does | When to use |
+|------|------|------|
+| **`/project:build-custom-connection`** | Generates all the metadata for a new custom connection. Answer 3 questions, get a deploy-ready package. | First time setting up a custom connection |
+| **`/project:diagnose-connection`** | Checks an existing connection for problems and tells you exactly what's wrong in plain English. Read-only — never changes anything in your org. | When something isn't working and you want to know why |
+
+Both skills work the same way: answer a few plain-English questions, the skill does the rest.
 
 ## What problem does this solve?
 
-**Before:** You want your agent to respond with rich UI (buttons, image cards, time pickers) instead of plain text. But setting this up means writing XML metadata files by hand, understanding Salesforce deployment commands, and wiring things together across multiple config layers. Even experienced developers find this tedious.
+**Before:** You want your agent to respond with rich UI (buttons, image cards, time pickers) instead of plain text. But setting this up means writing XML metadata files by hand, understanding Salesforce deployment commands, and wiring things together across multiple config layers. Then if something breaks, the error messages are cryptic — "Cannot update record as Agent is Active" or "Surface does not exist in org" with no clear path forward. Even experienced developers find this tedious.
 
-**After:** You run one skill, answer 3 plain-English questions, and get a fully automated deploy script that handles everything — including wiring the connection to your agent. No XML editing, no manual steps.
+**After:** You run one skill, answer a few plain-English questions, and get a fully automated deploy script (for new connections) or a clear diagnostic report (for broken ones). No XML editing, no cryptic errors.
 
 ## Is this for me?
 
@@ -100,6 +109,75 @@ Use the value from the `DeveloperName` column. Append `_v1` to it (e.g., `Custom
 
 Just deactivate your agent before running (the script will remind you) and reactivate it after.
 
+## Quick Start: Diagnosing a broken connection
+
+If your custom connection isn't working — the agent isn't using it, the responses come back as plain text, or the deploy failed — run the diagnostic skill to figure out what's wrong.
+
+```bash
+cd custom-connections-skill
+claude
+```
+
+Then type:
+
+```
+/project:diagnose-connection
+```
+
+The skill asks three plain-English questions:
+1. **What's your org alias?** (e.g., `my-org` — the name you used when you logged in with `sf org login`)
+2. **What's your agent's name?** (its developer name — find it in Setup → Agents → API Name column)
+3. **Which connection do you want to check?** (it lists what it found and lets you pick one or say "all")
+
+Then it runs a series of checks and shows you a report. **The skill is read-only** — it never changes anything in your org. Safe to run on production.
+
+### What the report looks like
+
+```
+=== Connection Health Report: Customer_Support_Agent ===
+
+▶ Top priority: Your agent is currently active. Deactivate it before
+  making any changes — Setup → Agents → Customer_Support_Agent → Deactivate.
+
+YOUR CONNECTIONS
+  1. Telephony — ✓ Standard connection, no issues
+  2. Web Chat  — ✓ Standard connection, no issues
+  3. Email     — ✓ Standard connection, no issues
+  4. AcmePortal_ACME01 (Custom)
+     ✓ Connection deployed in org
+     ✓ Adaptive responses enabled
+     ✓ Only 1 custom connection (within limit)
+     ✓ No duplicate connections
+     ✓ 2 response formats found and validated
+
+WARNINGS (1)
+  ⚠ Your agent is currently active
+    What this means: Your agent is live. You cannot safely make changes
+    while it's running.
+    How to fix: Setup → Agents → select your agent → click Deactivate.
+
+ISSUES (0)
+  None.
+
+=== Summary: 11 passed, 1 warning, 0 issues ===
+```
+
+Every warning and issue includes a **What this means** line (plain English) and a **How to fix** line (with Setup → navigation paths or exact commands to run). No metadata jargon.
+
+A copy of the report is also saved as JSON to `/tmp/diagnose-report.json` — useful if you want to feed the result into a CI/CD pipeline.
+
+### What it checks
+
+The diagnostic looks for the most common problems with custom connections:
+- The connection is wired to the agent correctly
+- The custom surface exists in the org and matches what the bundle expects
+- All the response formats it references are deployed
+- Only one custom connection per agent (a platform limit)
+- The agent is in a state where you can make changes
+- Any local response format files have valid JSON
+
+It also handles trickier cases automatically: agents with multiple versions, agents with no custom connection (it just checks the standard ones), and connections built outside the build-custom-connection skill (warns instead of crashing).
+
 ## What does success look like?
 
 After deploying, your app receives structured JSON instead of plain text — so you can render it as cards, buttons, carousels, or whatever UI your app supports.
@@ -189,6 +267,8 @@ The [`examples/`](./examples/) directory includes:
 **Important:** Your agent needs at least one topic that produces list-like responses (e.g., product options, plan choices) for the response formats to trigger. The agent only uses structured formats when it has multiple items to present — if your agent has no topics configured, it will fall back to plain text.
 
 ## Troubleshooting
+
+**First step:** Run `/project:diagnose-connection` — it checks for all the issues below automatically and tells you exactly what's wrong and how to fix it. Skip the table below unless you want a quick reference.
 
 | Issue | Fix |
 |-------|-----|
