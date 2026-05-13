@@ -136,6 +136,41 @@ The skill reuses `diagnose-connection`'s two-method approach to infer the curren
 
 **Limitation worth surfacing in the report:** Neither method can retrieve the *raw XML* of the existing AiSurface — only the list of formats it references. The skill regenerates the AiSurface XML from scratch each deploy, copying the existing format list and appending the new one. This means any custom fields the user added to the surface XML by hand (e.g., custom `<description>` text) will be lost. v1 acknowledges this as a known limitation; v2 could address it if the CLI registry adds AiSurface support.
 
+### Step 4a: Detection confidence checkpoint (the safety rail)
+
+Method A is a heuristic — it works for skill-built connections but can miss formats with non-conventional naming. For a read-only skill (diagnose) a miss just means an incomplete report. For this skill, **a miss means data loss on deploy**: the regenerated surface won't reference the format we couldn't detect, and the next deploy disconnects it from the connection.
+
+The skill addresses this with an explicit user confirmation **before any deploy**:
+
+```
+I found 2 existing formats on your connection:
+  1. AcmePortalChoices_ACME01 (Text Choices)
+  2. AcmePortalChoicesWithImages_ACME01 (Choices with Images)
+
+If this doesn't match what you expect, say "stop" and I'll exit
+without changing anything. Otherwise I'll add the new format you
+picked and redeploy.
+```
+
+The user confirms the detected state before anything is deployed. This turns the unknown-unknowns problem (formats Method A can't detect) into a UX gate rather than silent clobbering.
+
+**Special case — Method A finds zero formats** but the bundle references the surface (so it must have at least one format wired). The skill stops with a stronger message:
+
+```
+I couldn't detect any existing response formats on your connection,
+but your agent's configuration says this connection is wired up. This
+usually means your formats use non-standard naming I don't recognize.
+
+Continuing would regenerate your connection's configuration without
+those formats — disconnecting them from your connection.
+
+I'm stopping here to avoid that. To proceed, you'd need to either
+rename your formats to follow the convention <ClientName><Type>_<SurfaceId>,
+or wait for the v2 update that supports non-conventional naming.
+```
+
+This converts a silent failure mode into an explicit guardrail.
+
 **5. Generate the new format's `.aiResponseFormat` file** using the same templates as `build-custom-connection`. The file follows the existing naming convention (`<ClientName><FormatType>_<SurfaceId>`).
 
 **6. Generate the merged AiSurface XML.** Take the existing `<responseFormats>` entries from the parsed surface metadata, append the new format's developer name, write the merged XML.
@@ -146,6 +181,16 @@ sf project deploy start --metadata-dir <merged-output> --target-org $ORG_ALIAS
 ```
 
 **8. Verify the new format is in the deployed surface** by re-running the dry-run probe. If the new format name appears in the list, deploy succeeded.
+
+### Deploy atomicity (rollback behavior)
+
+Deploys via `--metadata-dir` are atomic — the entire metadata bundle either succeeds together or fails together. There's no partial-deploy state where some files land and others don't. Practical consequences:
+
+- **If deploy fails** (e.g., invalid JSON in the new format's schema, schema validation error from the API, transient network issue): **nothing changes in the org.** The existing surface and existing formats are untouched. The skill reports the API error verbatim plus a plain-English explanation, and exits cleanly.
+- **No rollback needed.** Since nothing was committed, there's nothing to roll back. The user fixes the issue (e.g., corrects the schema) and re-runs the skill.
+- **The temp workspace can be removed safely** any time — it never holds state the org needs.
+
+The skill prompt's error-handling rules cover the specific failure shapes (network timeout, malformed format JSON, agent activated mid-flow) and map them to plain-English messages with concrete fixes.
 
 ### Output
 
@@ -240,7 +285,7 @@ Same accessibility bar as `build-custom-connection`, `diagnose-connection`, and 
 **Show before/after — the central UX commitment:**
 - The user MUST see what's currently deployed before they confirm a change. No silent edits. The "CURRENT STATE" section appears in the report before "CHANGE" and "NEW STATE."
 - Frame it as "your connection currently has X — this will make it have Y." Never frame it as "deploying metadata."
-- If the user picks something that would clobber an existing format (Q3 deduplication), stop with: "Your connection already has Text Choices. Pick a different format type, or remove the existing one first using a future skill (not yet available)."
+- If the user picks something that would clobber an existing format (Q3 deduplication), warn and ask for confirmation: "Your connection already has Text Choices. Adding another with the same type would create a duplicate. **Confirm you want to proceed**, or pick a different format type." This preserves the legitimate use case (user wants to replace a format with a new version of the same type) without forcing them through a "remove" operation that doesn't exist yet in v1.
 
 **Error messages:**
 - Every error has **What this means** (1-sentence plain-English explanation) and **How to fix** (concrete step with Setup → navigation path or exact command).
@@ -249,7 +294,10 @@ Same accessibility bar as `build-custom-connection`, `diagnose-connection`, and 
 
 **Transparency about what changed:**
 - The report's CURRENT STATE / CHANGE / NEW STATE sections make every modification explicit and auditable.
-- The "hand-edited surface fields will be lost" limitation is surfaced in the report **before deploy** as a yellow note: "I'm about to regenerate your connection's configuration. If you've manually edited it (e.g., custom description text), those changes will be lost. The response formats and core settings will stay intact." User can confirm or cancel.
+- The "I might have missed formats" and "hand-edited surface fields will be lost" limitations are combined into a single detection-confidence checkpoint (Step 4a above). Before any deploy, the skill shows the formats it detected and asks "If this doesn't match what you expect, say stop." This covers both:
+  - Formats Method A couldn't detect (non-conventional naming) — would be disconnected on deploy if we proceeded
+  - Hand-edited surface fields (custom description, instructions) — would be lost when the surface XML is regenerated
+  Both are unknown-unknowns from the skill's perspective. The user is the only one who can spot them. The confirmation gate makes that explicit.
 - Brief status updates during long operations: "Looking at what you currently have...", "Generating your new format file...", "Updating your connection...", "Confirming the deploy worked..."
 
 **Report:**
@@ -371,10 +419,10 @@ Same repo. Trio becomes a quartet.
 |---|----------|---------------|----------------|
 | 1 | **Does Method A (naming-convention scan) reliably find all formats for a surface?** | The skill's Step 4 depends on Method A's accuracy. If Method A misses a format that actually exists (e.g., a format with non-conventional naming), the merge logic generates a surface XML missing that format — clobbering it on deploy. Method B catches missing-from-org cases but not present-in-org-but-missed-by-Method-A cases. | Validate against test-org's BaxterCreditUnion_BCU01 (skill-built, naming convention holds) AND TestEscalation's MicrosoftTeams (non-conventional naming). Document the gap. If Method A is unreliable, we need a third detection approach before v1 ships. |
 | 2 | **What does the deploy step return when the existing surface is "updated" with the same format list plus a new one?** | If the API treats "surface XML with 2 existing formats + 1 new format" as a no-op for the existing 2 and a "Created" for the new 1, we know the merge worked. If it treats the whole surface as "Changed" without distinguishing, we need a different verification approach. | Add a format to BCU_Test's BaxterCreditUnion_BCU01 connection in test-org via the skill. Inspect the deploy output. Document. |
-| 3 | **What's the right deduplication behavior — silent skip, warn, or hard error?** | If the user asks to add Text Choices when Text Choices already exists, we have three options: (a) warn and ask "are you sure? this will overwrite", (b) hard-error "format already exists, refusing to deploy", (c) silently no-op. (a) is most flexible but adds a UX branch. (b) is safest but may frustrate users iterating. | Decide based on observed user behavior. v1 leans toward (b) — hard error, refuse to deploy. Forces the user to either pick a different format or use a future "modify" verb. |
+| 3 | ~~**What's the right deduplication behavior — silent skip, warn, or hard error?**~~ | ~~Three options: (a) warn and confirm, (b) hard-error refuse, (c) silent no-op.~~ | **Resolved (post-v1 review):** warn and confirm (option a). A hard error blocks the legitimate use case of replacing a format with a new version of the same type — and the user has no "remove" verb yet to work around it. Warn+confirm preserves safety without dead-ending iteration. The format-picker also filters duplicates at the UX level (per Non-Technical UX section), so users only hit this prompt if they explicitly bypass the picker. |
 | 4 | **Should the dedup check warn even on different format developer names?** | The user might add `AcmePortalChoices_ACME01_v2` (a renamed variant) when `AcmePortalChoices_ACME01` already exists. Different developer names but functionally a duplicate. | v1: only check exact developer name match. Treating "similar names" as duplicates introduces false positives. The user can rename if they hit a real conflict. |
 
-**Validation priority:** Q1 and Q2 are load-bearing — must be resolved against test-org before any prompt scaffolding. Q3 and Q4 are UX choices that can be settled during build with reviewer input.
+**Validation priority:** Q1 and Q2 are load-bearing — must be resolved against test-org before any prompt scaffolding. Q3 resolved post-review (warn + confirm). Q4 is a UX choice that can be settled during build.
 
 ---
 
@@ -427,3 +475,9 @@ Before declaring v1 ready to build:
   - **README and GUIDE updates required** in the sign-off checklist, not optional.
 
   Sign-off checklist expanded from 8 to 13 non-technical UX items.
+
+- **v1.1 (2026-05-13 — post-review polish, 4 items addressed):** First reviewer pass on v1 surfaced 4 refinements:
+  - **Method A safety rail (Step 4a added):** the skill now shows the formats it detected and asks the user to confirm before any deploy. Special case for "Method A finds zero formats but bundle wires the surface" — hard stop with explanation, no deploy. Turns the unknown-unknowns problem into a UX gate rather than silent clobbering.
+  - **Hand-edits + missed-formats merged into one confidence checkpoint:** rather than two separate warnings, both unknown-unknowns are caught by Step 4a's "If this doesn't match what you expect, say stop" prompt. The user is the only one who can spot either issue — make that explicit.
+  - **Q3 deduplication resolved as warn + confirm** (not hard error). Hard error blocks the legitimate "replace a format with a new version" use case, especially when no "remove" verb exists yet. The format-picker still filters duplicates at the UX level, so users only hit the warn+confirm prompt if they bypass that.
+  - **Deploy atomicity / rollback section added:** `--metadata-dir` deploys are atomic. If the deploy fails, nothing changes in the org. No rollback needed. Documented so users (and reviewers) know there's no half-deployed state to worry about.
