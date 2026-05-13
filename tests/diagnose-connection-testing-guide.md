@@ -210,13 +210,16 @@ Note: Pre-flight environment checks (CLI installed, org connected, API version �
 **Expected result:**
 - Method A finds 0 formats matching the naming convention
 - Warning: "I couldn't find any response formats for this connection."
-- Method B (dry-run) may or may not run depending on whether the skill requires Method A to find formats first
+- **Method B (dry-run) is skipped** — there are no format names to validate. The skill does not try to infer format names from the deployed AiSurface (it can't retrieve AiSurface XML). Method B only runs when Method A finds formats to verify.
 - The skill does NOT crash — it handles the "no formats found" case gracefully
+
+**Also verify:** `TestEscalation` has a connection with surfaceType `Test` (surface name `SurfaceAction__Test`). This is a non-standard surfaceType. The skill should treat it like any other standard connection — report it as passed with its type name, not crash or report an error.
 
 **Review for:**
 - Does the naming convention search fail gracefully when the surface name has no suffix ID?
 - Is the warning message clear about why no formats were found?
 - Does the skill suggest what to do? (e.g., "If you built it with the `build-custom-connection` skill, they should be there. You may need to redeploy them.")
+- Does the skill handle the `Test` surfaceType without crashing?
 
 ---
 

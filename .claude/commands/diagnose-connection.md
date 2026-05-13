@@ -110,9 +110,11 @@ These checks apply to the whole agent, not individual connections.
 
 For each `<plannerSurfaces>` entry in the bundle, run these checks.
 
-### Standard connections (Telephony, Web Chat, Email)
+### Standard connections (Telephony, Web Chat, Email, Messaging, etc.)
 
-Standard connections have names starting with `SurfaceAction__` (like `SurfaceAction__Telephony`, `SurfaceAction__CustomerWebClient`, `SurfaceAction__ServiceEmail`). These are built into the platform and don't need much validation.
+Standard connections have names starting with `SurfaceAction__` (like `SurfaceAction__Telephony`, `SurfaceAction__CustomerWebClient`, `SurfaceAction__ServiceEmail`, `SurfaceAction__Messaging`). These are built into the platform and don't need much validation.
+
+**Unknown surface types:** If you encounter a surfaceType you don't recognize (e.g., `Test`), treat it the same as a standard connection — report it as passed with its type name. Don't crash or report an error for unexpected surfaceType values.
 
 For each standard connection:
 - passed: "**[Name]** — Standard connection, provided by Salesforce. No issues."
@@ -147,7 +149,7 @@ This verifies that the response formats (like text choices, image cards, etc.) y
 - The `build-custom-connection` skill names formats as `<ClientName><FormatType>_<SurfaceId>` (e.g., `BaxterCreditUnionChoices_BCU01` for surface `BaxterCreditUnion_BCU01`)
 - Parse the surface name to extract the prefix and suffix, then search the AiResponseFormat list
 - Report what you found: "Found N response formats for this connection: [list]"
-- If zero found → warning: "I couldn't find any response formats for this connection. If you built it with the `build-custom-connection` skill, they should be there. You may need to redeploy them."
+- If zero found → warning: "I couldn't find any response formats for this connection. If you built it with the `build-custom-connection` skill, they should be there. You may need to redeploy them." **Skip Method B** — there are no format names to validate.
 
 *Method B: Verify formats actually work (dry-run deploy)*
 - Re-deploy the real AiSurface (using the actual surface name from the bundle) in dry-run mode. This validates exactly what's deployed — no generated stubs:
