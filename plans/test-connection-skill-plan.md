@@ -1,8 +1,8 @@
-# test-connection — Skill Plan (v2)
+# test-connection — Skill Plan (v3 — final)
 
 **Author:** Abhi Rathna
 **Date:** 2026-05-13
-**Status:** Draft — 6 open questions need validation against test-org before building
+**Status:** Build-ready. All open questions validated against test-org on 2026-05-13.
 
 ---
 
@@ -36,13 +36,13 @@ Every one of these failure modes was hit during real testing of `build-custom-co
 | 1 | ECA not configured / wrong Consumer Key | `invalid_client_id` error | "Your Consumer Key isn't recognized in this org. Check Setup → External Client Apps → your app → Settings → OAuth Settings → Consumer Key." |
 | 2 | Client Credentials Flow not enabled | "no client credentials user enabled" | "Your ECA doesn't have Client Credentials Flow enabled. Go to Setup → External Client Apps → your app → Policies tab → enable 'Enable Client Credentials Flow' and set a Run As user." |
 | 3 | Missing OAuth scopes | OAuth succeeds but Agent API returns 401 | Decode the JWT scope claim and verify all 4 required scopes are present (api, refresh_token, chatbot_api, sfap_api). Report which are missing. |
-| 4 | Run As user lacks permissions | Token works but session creation fails | Tell the user to verify the Run As user has 'API Only access' or appropriate profile. |
+| 4 | Run As user lacks permissions | Token works but session creation fails | Tell the user to verify the Run As user has 'API Only access' or appropriate profile. If pre-flight passes but session creation 401s, mention permset/profile as a likely cause. |
 | 5 | Wrong agent ID | 404 on session creation | Query BotDefinition first, validate the agent exists before attempting session. |
-| 6 | Agent is deactivated | Session creation fails or returns errors | Check BotVersion status before attempting. Surface "Your agent is deactivated. Activate it before testing." |
-| 7 | Wrong field names in request body | 400 with field validation errors | Always use the validated request structure (`instanceConfig`, `streamingCapabilities`, `surfaceConfig`) — no `forceConfigEndpoint`, no `streamingConfig`. |
+| 6 | Agent is deactivated | Session creation fails or returns errors | Check BotVersion status before attempting. Surface "Your agent needs to be **active** to test it. If you just ran diagnose-connection or deployed changes, you may have deactivated it." |
+| 7 | Wrong field names in request body | 400 with field validation errors | Always use the validated request structure: `tz, surfaceType, botMode, conversationContext, surfaceConfig, richContentCapabilities, externalSessionKey, instanceConfig, streamingCapabilities, featureSupport, executionHistory, parameters, bypassUser, variables` (the 14 fields the API accepts — confirmed empirically). No `forceConfigEndpoint`, no `streamingConfig`, no `externalClientId`. |
 | 8 | Agent API runtime not provisioned on org | 404 from `test.api.salesforce.com` | Detect orgfarm/dev-ed orgs, warn upfront: "Agent API runtime isn't typically available on Developer Edition or orgfarm orgs. Use a sandbox or production org." |
-| 9 | Response comes back as plain text (no format triggered) | Hard to tell if connection works or if the agent just didn't pick a format | After sending a message, parse the `result[]` array. If empty, report "agent responded with plain text — your connection works but the agent didn't trigger a structured format. Try a more targeted prompt or verify your topic instructions." |
-| 10 | Wrong response format triggered | Agent uses ChoicesWithImages when you expected Choices | Optional check: user can specify expected format. Report mismatch as a warning, not a failure. |
+| 9 | Response comes back as plain text on a Custom connection (no format triggered) | Hard to tell if connection works or if the agent just didn't pick a format | After sending a message, parse the `result[]` array. If empty AND the connection is Custom, report "agent responded with plain text — your connection works but the agent didn't trigger a structured format. Try a more targeted prompt or verify your topic instructions." If empty AND the connection is standard, this is expected behavior — don't warn. |
+| 10 | Long-response timeout (knowledge/RAG agents take 30-60s) | curl appears to hang with no output | Set curl `--max-time 90`. Show a "waiting for response..." message after 5s of silence so users don't think it's broken. Treat 408/timeout as a warning, not a hard failure. |
 
 ---
 
@@ -63,7 +63,7 @@ Every one of these failure modes was hit during real testing of `build-custom-co
    3. Email (standard)
    4. BaxterCreditUnion_BCU01 (custom)
    ```
-   The skill maps each connection to the right Agent API `surfaceType` value automatically (see surfaceType Mapping).
+   The skill passes the bundle's raw `surfaceType` value through to the API. The API accepts all standard surface types — no mapping needed (validated empirically — see Validation Results).
 
 4. **Do you have an External Client App set up for the Agent API?**
    - If yes → ask for the **Consumer Key** and **Consumer Secret** (from **Setup → External Client Apps Manager → your app → OAuth Settings**)
@@ -80,17 +80,29 @@ Every one of these failure modes was hit during real testing of `build-custom-co
 
 ### Pre-flight Checks
 
+> **State requirement is INVERTED from build/diagnose.** `build-custom-connection` and `diagnose-connection` both want the agent **deactivated** before running. `test-connection` requires the agent to be **active** — you can't send messages to a deactivated agent.
+
 Run these before any API calls. Stop early with clear messages if any fail.
 
 1. **Salesforce CLI installed** — `sf --version`
 2. **Org connected** — `sf org display --target-org $ORG_ALIAS`
 3. **API version ≥ 62.0** — from org display output
 4. **Agent exists** — retrieve the bundle (same logic as diagnose-connection, including multi-version fallback for agents with versioned bundles like `BCU_Test_v1`, `BCU_Test_v2`)
-5. **Agent is active** — query BotVersion for Status = 'Active'. If deactivated, stop with: "Your agent needs to be active to test it. Go to **Setup → Agents → select your agent → Activate**." (This is the opposite of diagnose-connection, which warns when agents are active.)
+5. **Agent is active** — query BotVersion for Status = 'Active'. If deactivated, stop with: "Your agent needs to be **active** to test it. If you just ran diagnose-connection or deployed changes, you may have deactivated it. Go to **Setup → Agents → select your agent → Activate**."
 6. **Selected connection is on the agent** — verify the chosen surface exists in the bundle's plannerSurfaces
 7. **ECA credentials work for OAuth** — attempt the client_credentials grant. If it fails, surface the specific error (invalid_client_id, no client credentials user enabled, etc.) with the exact Setup → navigation path to fix it
 8. **Required scopes present** — decode the returned JWT, verify `api`, `refresh_token`, `chatbot_api`, and `sfap_api` are all in the `scope` claim. Missing scopes get named in the error.
 9. **Agent API runtime endpoint available** — the OAuth response should include `api_instance_url`. If it returns only `instance_url` (no Agent API runtime), warn: "Your org may not have the Agent API runtime provisioned. This is common on Developer Edition or orgfarm orgs. The test may fail at session creation."
+
+### Inline Status Display
+
+Right after retrieving the agent, the skill shows the agent's name and current state inline before any other checks:
+
+```
+Found agent: Customer_Support_Agent (v2 — active, ready to test)
+```
+
+If the agent is inactive, this message is the first place the user sees it — the fix instruction (Setup → Agents → Activate) follows immediately. This avoids the scenario where someone runs test-connection right after diagnose-connection without re-activating.
 
 ### Test Sequence
 
@@ -98,36 +110,37 @@ After pre-flight, the skill runs three checks against the live API:
 
 **Check 1: Session creation**
 - POST to `<api_instance_url>/einstein/ai-agent/v1/agents/<agentId>/sessions`
-- Body uses validated structure: `externalSessionKey`, `instanceConfig`, `streamingCapabilities`, `surfaceConfig: {surfaceType: "$SURFACE_TYPE"}`
-- The `$SURFACE_TYPE` is determined by the surfaceType mapping from the selected connection (see surfaceType Mapping)
+- Body uses validated structure: `externalSessionKey`, `instanceConfig`, `streamingCapabilities: {chunkTypes: ["Text"]}`, `surfaceConfig: {surfaceType: "$BUNDLE_SURFACE_TYPE"}`
+- The `$BUNDLE_SURFACE_TYPE` is the raw value from the bundle's plannerSurfaces (e.g., `Custom`, `Telephony`, `Messaging`). No mapping needed.
 - Pass if session ID is returned. Fail with the response body if 4xx/5xx.
 
 **Check 2: Send message and receive response**
 - POST to `<api_instance_url>/einstein/ai-agent/v1/sessions/<sessionId>/messages`
-- Body: the test message from input (or default probe)
+- Body: the test message from input
+- Use curl `--max-time 90` (knowledge/RAG agents can take 30-60s). Show a "waiting for response..." message after 5s of silence.
 - Pass if a 200 response is received with messages.
 - Capture the full response payload.
 
 **Check 3: Validate response shape**
 - Parse `messages[*].result[]` array.
-- If `result[]` contains an entry with `type: "SURFACE_ACTION__<formatName>"` → pass. Custom connection is working end-to-end. Report which format was used.
-- If `result[]` is empty but a text response came back → warning. "Connection works (session started, message sent, response received) but the agent returned plain text instead of a structured format. This usually means the agent didn't have a topic that produces choices. Try a more targeted prompt, or check your agent's topics."
+- **For Custom connections:**
+  - If `result[]` contains `{"type": "SURFACE_ACTION__<formatName>", "value": "<JSON-string>"}` → pass. Connection is working end-to-end.
+    - The `value` is a **string-encoded JSON object** (validated empirically). Use `JSON.parse(value)` to extract `message` and `choices`/other format fields.
+    - Look up the matching local `.aiResponseFormat` file by name (Decision #10). If found, run structural validation against it. If the agent picked a format not in local files, skip validation (don't fail), just show the raw JSON.
+  - If `result[]` is empty but a text response came back → warning. "Connection works (session started, message sent, response received) but the agent returned plain text instead of a structured format. Try a more targeted prompt, or check your agent's topics."
+- **For standard connections:**
+  - `result[]` is expected to be empty (standard connections don't use response formats). The agent's reply is in `messages[*].message`. Report as passed.
 - If session creation succeeded but message send failed → fail with the API error body.
 
-### Interactive Mode
+### Interactive Mode (multi-turn, opt-in)
 
-After showing the first response, ask: **"Want to send another message, or are you done?"**
+After showing each response, ask: **"Want to send another message, or are you done?"**
 
-If they want to continue:
-- Increment `sequenceId` for each message (1, 2, 3, ...)
-- Show each response the same way (human-readable rendering)
-- Keep going until they say done or the agent ends the session (`EndSession` message type)
+- If the user says yes: increment `sequenceId` (1, 2, 3...) and send the next message in the same session.
+- If the user says no: end the session (cleanup) and compile the report.
+- **Hard cap: 5 turns.** If the agent hasn't returned a structured format by turn 5 (on a Custom connection), report "connection works (session + N messages) but no structured format was triggered after 5 turns" and suggest checking topic instructions.
 
-If they're done:
-- End the session (cleanup)
-- Show the test summary including all messages sent/received
-
-Why multi-turn: A single message often isn't enough to trigger structured responses — the agent may ask a clarifying question first. Multi-turn lets you have the full conversation needed to reach a response format.
+**Report semantics: single-response, not transcript.** The skill grades the **last meaningful structured response** — not the full conversation. The JSON output captures the final graded response, not every turn. This keeps the report logic simple while preserving the multi-turn protocol the primary persona needs (admins who don't know the exact trigger phrase).
 
 ### Output
 
@@ -139,7 +152,7 @@ Two formats, same pattern as diagnose-connection:
 === Connection Test Report: Customer_Support_Agent ===
 
 ▶ Top result: ✓ Connection works end-to-end. Agent responded using
-  AcmePortalChoices_ACME01 format with 4 choices.
+  AcmePortalChoices_ACME01 format with 4 choices (turn 2 of 2).
 
 PRE-FLIGHT
   ✓ Salesforce CLI installed
@@ -151,9 +164,9 @@ PRE-FLIGHT
 
 TEST SEQUENCE
   ✓ Session created (ID: 019e...)
-  ✓ Message sent: "Show me my plan options"
-  ✓ Response received (status 200)
-  ✓ Structured response: AcmePortalChoices_ACME01
+  ✓ Turn 1: "What can you help me with?" → plain text
+  ✓ Turn 2: "Show me my plan options" → AcmePortalChoices_ACME01
+  ✓ Response shape valid (matched local AcmePortalChoices_ACME01.aiResponseFormat)
 
 WHAT THE AGENT RETURNED
   Format: AcmePortalChoices_ACME01
@@ -163,6 +176,8 @@ WHAT THE AGENT RETURNED
     2. Basic Plan ($10/month)
     3. Professional Plan ($25/month)
     4. Enterprise Plan ($50/month)
+
+  Schema source: ./output/unpackaged/aiResponseFormats/AcmePortalChoices_ACME01.aiResponseFormat
 
 WARNINGS (0)
   None.
@@ -180,19 +195,23 @@ ISSUES (0)
 {
   "$schema": "test-connection-v1",
   "agent": "Customer_Support_Agent",
+  "bundleVersion": "v2",
+  "connection": "AcmePortal_ACME01",
   "timestamp": "2026-05-13T...",
   "passed": 9,
   "warnings": 0,
   "failed": 0,
   "topResult": "Connection works end-to-end",
+  "turnsUsed": 2,
   "checks": [
     { "name": "session_created", "status": "passed", "detail": "Session ID: 019e..." },
-    { "name": "structured_response", "status": "passed", "detail": "Format: AcmePortalChoices_ACME01" }
+    { "name": "structured_response", "status": "passed", "detail": "Format: AcmePortalChoices_ACME01" },
+    { "name": "schema_validation", "status": "passed", "detail": "Validated against ./output/unpackaged/aiResponseFormats/AcmePortalChoices_ACME01.aiResponseFormat" }
   ],
   "response": {
     "format": "AcmePortalChoices_ACME01",
     "message": "Here are the plans we offer:",
-    "choices": [...]
+    "choices": ["Starter Plan ($5/month)", "..."]
   }
 }
 ```
@@ -209,6 +228,7 @@ The existing `examples/verify-connection.sh` already implements the OAuth + sess
 - The 3-check sequence above
 - Plain-English error mapping for the failure modes
 - The richer report format
+- Multi-turn session handling
 
 No bash script wrapping needed — the skill is just guided invocation of the same `curl` calls with structured interpretation.
 
@@ -218,28 +238,15 @@ The skill creates an Agent API session, which is a real org-side resource (consu
 
 This is different from `diagnose-connection` (truly read-only). `test-connection` is closer to "minimum-write": it makes the smallest possible test interaction with the org and cleans up after itself. The user should be aware this counts toward their session/credit usage.
 
-The skill's "What It Does NOT Do" section calls this out explicitly.
+### surfaceType — pass-through, no mapping
 
-### surfaceType Mapping
-
-The bundle XML has surface types like `Custom`, `Telephony`, `Messaging`. The Agent API session requires a `surfaceConfig.surfaceType` value. Based on GUIDE.md and the Agent API docs:
-
-| Bundle surfaceType | Agent API surfaceType |
-|-------------------|----------------------|
-| `Custom` | `Custom` |
-| `Messaging` | `MessagingForInAppAndWeb` |
-| `CustomerWebClient` | `NextGenChat` |
-| `Telephony` | `Voice` |
-| `ServiceEmail` | `Email` |
-| Unknown (e.g., `Test`) | Try the value as-is — warn that it may not work |
-
-**Open question:** This mapping needs validation against test-org. See Open Questions #1.
+**Empirical finding (Q1):** The Agent API accepts all surface type values without translation. Both bundle-style (`Telephony`, `Messaging`, `CustomerWebClient`, `ServiceEmail`) and the documentation's "API-style" names (`MessagingForInAppAndWeb`, `NextGenChat`, `Voice`, `Email`) all return 200 from session creation against test-org. No mapping table needed — the skill passes the bundle's raw `surfaceType` value straight through to `surfaceConfig.surfaceType`.
 
 ### Multi-Version Agent Support
 
 Same approach as diagnose-connection: if `GenAiPlannerBundle:$AGENT_NAME` fails to retrieve, search for versioned bundles (`${AGENT_NAME}_v*`), find the active version via BotVersion query, and retrieve that bundle. Use the agent name for display, the bundle name for file paths.
 
-### ECA Setup Guide
+### ECA Setup Guide (when user has no ECA)
 
 When the user doesn't have an External Client App, walk them through it step by step. This is the #1 blocker for first-time users.
 
@@ -284,6 +291,18 @@ Render structured responses in a human-readable way in the terminal:
 
 **Unknown/Custom Formats:** Pretty-print the raw JSON.
 
+Important: `result[].value` is a **string-encoded JSON object** (empirical finding from Q9). The skill must `JSON.parse(value)` before extracting `message` / `choices` / etc. Direct field access on the raw `value` won't work.
+
+### Schema Validation Logic (Decision #10)
+
+When `result[]` contains a `SURFACE_ACTION__<formatName>` entry:
+
+1. **Match by triggered format name first.** Look in the working directory for `.aiResponseFormat` files. Find the one whose developer name matches the format the agent used (e.g., agent picked `AcmePortalChoices_ACME01` → look for `AcmePortalChoices_ACME01.aiResponseFormat`).
+2. **If matching local file found:** Parse the `<input>` element as JSON Schema. Validate the parsed `value` structurally — required fields present, types correct, arrays non-empty. Don't pull in a JSON Schema library; flat structural checks are sufficient.
+3. **If no matching local file (agent used a format not in local files):** Skip validation, show the raw parsed JSON. Don't fail — this is normal when the user runs the skill from a directory that only has some of the agent's formats.
+4. **If no `.aiResponseFormat` files in CWD at all:** Skip validation entirely, show raw JSON. Don't try harder than this.
+5. **Always report which file was used as the schema source** in the markdown and JSON output. Catches stale local files where the user modified the format in the org but didn't rebuild locally.
+
 ### Credential Handling
 
 - Never write credentials to a file (no config, no JSON reports with tokens)
@@ -291,6 +310,10 @@ Render structured responses in a human-readable way in the terminal:
 - Hold in shell variables only for the duration of the test
 - End the session on exit — tokens aren't reusable across sessions
 - JSON report sanitizes all credentials to `<redacted>`
+
+### Cleanup — Always
+
+Wrap the test sequence in a `try/finally`-style pattern in the skill prompt: whether the test passes, fails, or crashes mid-run, **always** end the session before exiting. The failure path is where orphaned sessions are most likely — explicit cleanup prevents Flex Credit drain.
 
 ### Where It Lives
 
@@ -309,16 +332,19 @@ Same repo, same pattern.
 ```
 # Test Agent Connection
 ## Your role
-## Step 1: Gather input (org, agent, consumer key, secret, optional test message)
+## Step 1: Gather input (org, agent, connection, ECA, message)
 ## Step 2: Pre-flight checks (CLI, org, agent active, OAuth, scopes, runtime)
-## Step 3: Create session
-## Step 4: Send test message
-## Step 5: Validate response shape
-## Step 6: End session and clean up
-## Step 7: Compile and display results
-## Output templates (markdown + JSON)
+## Step 3: Display agent status inline (active — ready to test)
+## Step 4: Create session
+## Step 5: Send test message (with --max-time 90 + waiting indicator at 5s)
+## Step 6: Validate response shape (Custom vs standard logic split)
+## Step 7: Render response in human-readable format
+## Step 8: Ask "Want to send another message, or are you done?" (cap at 5 turns)
+## Step 9: End session (always, even on failure)
+## Step 10: Compile and display results (markdown + JSON)
+## Output templates
 ## Error handling rules
-## Important rules (secret handling, runtime side effects)
+## Important rules (secret handling, runtime side effects, always-cleanup)
 ```
 
 ---
@@ -326,27 +352,31 @@ Same repo, same pattern.
 ## What It Does NOT Do
 
 - **Does not deploy or modify metadata.** This skill exercises the Agent API, not the metadata API. The only org-side effect is a temporary session (which is cleaned up).
-- **Does not test streaming responses.** v1 uses `chunkTypes: ["Text"]` for full responses. Streaming (SSE) for real-time display is a v2 candidate.
+- **Does not test true streaming responses.** v1 uses `chunkTypes: ["Text"]` which returns a single JSON body (validated empirically — Q9). True streaming via the `messagesStream` endpoint is a v2 candidate.
 - **Does not create the ECA for you.** Walks you through setup step by step, but you do it in the Setup UI. Auto-creating ECAs would require different metadata and permissions — v2 candidate.
 - **Does not store credentials.** Secrets are held in shell variables only for the test duration. Never logged, never written to disk.
 - **Does not test against the Agent Builder preview.** Preview doesn't support custom connections — that's a documented platform limitation. This skill always tests via the Agent API.
-- **Does not validate response payloads against the declared JSON schema in v1.** AiResponseFormat can't be reliably retrieved (CLI blocks it). The skill shows the raw response — the user verifies the structure visually. Automated schema validation is a v2 candidate.
 - **Does not test all connections at once.** One connection per test run. Testing "all" would require separate sessions per surface type.
+- **Does not exceed 5 turns.** Multi-turn is capped to keep test runs bounded and prevent runaway sessions.
+- **Does not validate against schemas the user doesn't have locally.** AiResponseFormat XML can't be retrieved via the CLI. If the user's working directory doesn't have the matching `.aiResponseFormat` file, the skill shows the raw JSON without trying to validate.
 
 ---
 
 ## Effort Estimate
 
-| Task | Hours |
-|------|-------|
-| Validate open questions against test-org (surfaceType mapping, response structure, auth flows) | ~3 |
-| Skill prompt (`.claude/commands/test-connection.md`) | ~5 |
-| Response format rendering logic | ~2 |
-| ECA setup guide (in-skill walkthrough) | ~1 |
-| Testing against test-org (all connection types, error cases, interactive mode) | ~4 |
-| **Total** | **~15** |
+| Task | Hours (multi-turn) | Hours (no multi-turn) |
+|------|--------------------|-----------------------|
+| Skill prompt (`.claude/commands/test-connection.md`) | ~5 | ~4 |
+| Schema validation + format-match logic | ~1.5 | ~1.5 |
+| Response format rendering logic | ~2 | ~2 |
+| ECA setup guide (in-skill walkthrough) | ~1 | ~1 |
+| Testing against test-org (all connection types, error cases, multi-turn flow) | ~4 | ~3 |
+| Documentation (README + GUIDE updates) | ~1 | ~1 |
+| **Total** | **~14.5h** | **~12.5h** |
 
-The extra hours vs. diagnose-connection come from the open questions (empirical validation needed), the ECA setup guide, interactive mode (multi-turn session management), and response format rendering.
+**Note:** Q1, Q2, Q8, Q9, Q10 are all resolved (see Validation Results below). The 3-4h "validate open questions" block from v2 is no longer needed. Effort is reduced from 15-17h (v2) to 14.5h.
+
+**Risk margin:** Add 2h if the schema validation logic surfaces edge cases when running against agents with multiple format types simultaneously.
 
 ---
 
@@ -356,33 +386,42 @@ The extra hours vs. diagnose-connection come from the open questions (empirical 
 |---|----------|-----------|
 | 1 | **ECA OAuth, not sf CLI token** | The skill should authenticate the same way the user's client app will. If the ECA isn't set up, that's worth discovering now. sf CLI token shortcut is a v2 candidate. |
 | 2 | **Walk through ECA setup in-skill** | The #1 blocker is OAuth configuration. Without this, most users can't get past authentication. |
-| 3 | **Interactive mode (multi-turn)** | A single message often isn't enough to trigger structured responses — the agent may ask a clarifying question first. Multi-turn lets you have the full conversation. |
-| 4 | **Non-streaming in v1** | Streaming (SSE) adds complexity — parsing partial chunks, handling reconnects. Full response is simpler and sufficient for testing. |
+| 3 | **Interactive multi-turn protocol, single-response report semantics** | Send message, show response, ask "Want to send another, or are you done?" Cap at 5 turns. Grade the **last meaningful structured response** — not the transcript. JSON output captures the final graded response only. ~1h impl (loop + prompt), not 3h. |
+| 4 | **Non-streaming in v1** | `chunkTypes: ["Text"]` returns a single JSON body (validated — Q9). Streaming via the `messagesStream` endpoint is a v2 candidate. |
 | 5 | **Reuse bundle retrieval from diagnose-connection** | Same multi-version fallback, same connection listing. No reason to reinvent. |
 | 6 | **Never store credentials** | OAuth secrets in files are a security risk. Hold in shell variables, clear on exit. |
 | 7 | **Render structured responses in terminal** | The whole point is showing what the response looks like. Raw JSON alone isn't useful to admins. |
-| 8 | **Always end session on exit** | Don't leave orphaned sessions consuming org resources. Even on error, attempt cleanup. |
+| 8 | **Always end session on exit** | Don't leave orphaned sessions consuming org resources. Even on error, attempt cleanup. Wrap in try/finally pattern. |
 | 9 | **Suggest messages based on format type** | Reduces friction — the user doesn't have to guess what message will trigger a structured response. |
-| 10 | **Local-first schema fallback, structural validation only** | AiResponseFormat XML can't be retrieved via the CLI. The skill looks for local `.aiResponseFormat` files in the working directory first (typically present from a recent `build-custom-connection` run). If found, use them as the source of truth and validate the response against them — but only structurally: required fields present, types correct, arrays non-empty. No full JSON Schema library. If no local files are found, fall back to showing the raw response for visual verification. Catches the failure modes that matter (empty choices, missing message, wrong type) without adding dependencies. |
+| 10 | **Local-first schema fallback, structural validation only** | Match by triggered format name first. Validate structurally if matching local file found (required fields present, types correct, arrays non-empty — no JSON Schema library). If agent picked a format not in local files: skip validation, show raw JSON, don't fail. If no local files at all: skip entirely. Always report which file was used as schema source. |
 | 11 | **One connection per test** | Multiple connections need separate sessions and the output gets confusing. Keep it focused. |
-| 12 | **Plain text is not an error** | The agent choosing plain text over a response format is normal behavior. Report it clearly, suggest a different message, don't mark it as failed. |
+| 12 | **Plain text on Custom = warning, on standard = expected** | Standard connections don't use response formats. `result: []` on a standard connection is normal — don't warn. On a Custom connection it's a warning ("agent didn't trigger a format"). |
 | 13 | **Same repo, same namespace** | `/project:test-connection`. Migrates to `/agentforce:` with the family later. |
-| 14 | **JWT scope validation in pre-flight** | Catches "wrong scopes" before it manifests as a 401 mid-test. Cheaper to fail fast with a clear message. |
-| 15 | **All standard connection types supported** | Not just custom — the skill maps each bundle surfaceType to the Agent API's surfaceType value. Tests any connection on the agent. |
+| 14 | **JWT scope validation in pre-flight** | Catches "wrong scopes" before it manifests as a 401 mid-test. Cheaper to fail fast with a clear message. If pre-flight passes but session creation 401s, mention permset/profile as a likely cause. |
+| 15 | **All standard connection types supported (pass-through)** | Validated empirically (Q1) — the Agent API accepts all surface type values without mapping. Pass the bundle's raw `surfaceType` value straight to `surfaceConfig.surfaceType`. Same session flow works for Custom, Voice, Telephony, Messaging, Email, etc. (Q10). |
+| 16 | **Inline agent status display** | Right after retrieval, show "Found agent X (active — ready to test)" before any other checks. Avoids the user running test-connection right after diagnose-connection without re-activating. |
+| 17 | **90-second curl timeout with 5s "waiting" indicator** | RAG/knowledge agents can take 30-60s to respond. Set `--max-time 90`. Show "waiting for response..." after 5s of silence so users don't think it hung. Treat 408/timeout as a warning, not a hard failure. |
 
 ---
 
-## Open Questions
+## Validation Results — All Open Questions Resolved
 
-| # | Question | Status | How to validate |
-|---|----------|--------|-----------------|
-| 1 | **What are the exact surfaceType values the Agent API accepts?** GUIDE.md shows `Custom`. Need to confirm `MessagingForInAppAndWeb`, `NextGenChat`, `Voice`, `Email`. | Open | Start sessions with each surfaceType against test-org agents that have those connections |
-| 2 | **What's the exact JSON structure of an Agent API response when a response format is used?** Where does the structured data live — `formatName`/`formatData`? `result[].type`? | Open | Send a message through the BaxterCreditUnion_BCU01 connection and inspect the full response |
-| 3 | **Can the sf CLI access token (from `sf org display`) start Agent API sessions?** If yes, this would be a quick-test shortcut for v2. | Open | Try `curl` with the sf CLI token against the Agent API session endpoint |
-| 4 | **What error does the Agent API return when the agent is inactive?** Need the exact error to provide a clear diagnostic message. | Open | Deactivate a test agent and attempt session creation |
-| 5 | **What's the canonical "end session" API call?** GUIDE.md doesn't document it. If there's no DELETE endpoint, sessions auto-expire. | Open | Test DELETE against `<api_url>/einstein/ai-agent/v1/sessions/<id>` |
-| 6 | **Should the skill accept the secret via direct input or environment variable?** Direct input is simpler for admins but visible in conversation. Env var (`SF_ECA_SECRET`) is more secure but adds friction. | Open | Decide based on persona. Likely: direct input in v1 with "never stored or logged" guarantee. |
-| 7 | **Multi-turn interactive mode in v1: yes or no?** Decision #3 enables interactive multi-turn ("agent may ask a clarifying question first"). One reviewer prefers single-message-per-run for simplicity ("one message is enough to prove the format triggers"). Need to pick before building. | Open | Confirm the primary persona's actual workflow. If admins typically need clarifying turns to reach a structured response, keep multi-turn. If the test message can be tuned to trigger a format on turn 1, drop multi-turn for v1. |
+Validated against test-org on 2026-05-13 (BCU_Test agent, BaxterCreditUnion_BCU01 custom connection):
+
+| # | Question | Result | How resolved in plan |
+|---|----------|--------|---------------------|
+| Q1 | Which surfaceType values does the Agent API accept? | **All 9 tested values accepted** (Custom, MessagingForInAppAndWeb, NextGenChat, Voice, Email, Telephony, Messaging, CustomerWebClient, ServiceEmail). | Decision #15. Pass the bundle's raw surfaceType value through. No mapping table. |
+| Q2 | Does the session-creation request need an `externalClientId`? | **`externalClientId` is not a recognized field.** API returns "Unrecognized field" error. The 14 valid fields are: `tz, surfaceType, botMode, conversationContext, surfaceConfig, richContentCapabilities, externalSessionKey, instanceConfig, streamingCapabilities, featureSupport, executionHistory, parameters, bypassUser, variables`. | Failure mode #7 documents the valid fields list. Skill never sends `externalClientId`. |
+| Q3 | Canonical "end session" API call? | `DELETE /einstein/ai-agent/v1/sessions/<sessionId>` returns 200 silently. | Decision #8 + cleanup section. Skill always issues DELETE on exit. |
+| Q4 | Direct input or env var for the secret? | Direct input chosen (admin persona). | Credential Handling section. JSON output sanitizes to `<redacted>`. |
+| Q5 | Does `useStreaming: false` reliably produce a non-streaming response? | The `chunkTypes: ["Text"]` parameter returns a **single JSON body**, not chunked stream. (Streaming requires the `messagesStream` endpoint.) Latency: 5-10s in test-org. | Decision #4 + Check 2. Skill uses the non-streaming endpoint. |
+| Q6 | Are there scope-related 401s that pass JWT decoding? | Untestable in test-org (admin user has full access). Documented as a fallback ("if pre-flight passes but session creation 401s, mention permset/profile as a likely cause"). | Failure mode #4. |
+| Q7 | Multi-turn vs single-message? | Keep multi-turn, opt-in shape, capped at 5 turns. Report grades last meaningful structured response. | Decision #3. |
+| Q8 | Long-response timeout behavior? | Test-org latency is 5-10s (no RAG agents available locally). Production agents with knowledge can hit 30-60s. | Decision #17. 90s curl timeout + 5s "waiting" indicator. |
+| Q9 | `chunkTypes: ["Text"]` shape? | **Single JSON body, not chunked.** Streaming requires the `messagesStream` endpoint. | Decision #4 + What It Does NOT Do (no true streaming in v1). |
+| Q10 | Standard connections — different session flow? | **No.** All surface types use the same session creation endpoint and message flow. Standard connections return `result: []` (empty — no formats wired). | Decision #12 + Decision #15. Different report semantics for empty `result[]` based on connection type. |
+
+**Bonus finding from Q9:** `result[].value` is a **string-encoded JSON object** — needs `JSON.parse(value)` to extract `message` / `choices`. Direct field access fails. Documented in Response Format Rendering section.
 
 ---
 
@@ -399,7 +438,7 @@ The three skills form a complete lifecycle:
 2. **Diagnose** — validates configuration is correct (agent must be deactivated for fixes)
 3. **Test** — proves the connection works at runtime (agent must be **active**)
 
-The state flip (deactivated → active) between diagnose and test is intentional. The skill should call it out clearly.
+The state flip (deactivated → active) between diagnose and test is intentional. The skill calls it out clearly in pre-flight #5, the inline status display, the failure mode table, and this section.
 
 ## Relationship to verify-connection.sh
 
@@ -410,16 +449,48 @@ The repo already has `examples/verify-connection.sh` — a bash script that star
 | Starts session | Yes | Yes |
 | Sends a message | No | Yes |
 | Shows the response | No | Yes — human-readable + raw JSON |
-| Interactive (multi-turn) | No | Yes |
+| Multi-turn (opt-in) | No | Yes (capped at 5 turns) |
 | Helps with ECA setup | No | Yes — step-by-step guide |
 | Error messages with fix instructions | Minimal | Yes — every error explained |
-| Works with standard connections | No (hardcoded Custom) | Yes — all surface types |
+| Works with standard connections | No (hardcoded Custom) | Yes — all surface types (validated) |
+| Schema validation | No | Yes (local-first, structural) |
+| 90s timeout + waiting indicator | No | Yes |
 
 The script stays useful for CI/CD smoke tests. The skill is for interactive testing and first-time setup.
 
 ---
 
+## Reviewer Sign-off Checklist
+
+Before declaring v3 final, confirm:
+
+- [ ] All three reviewer rounds incorporated (R1, R2, R3 — see Changelog v3 entry)
+- [ ] All 10 open questions empirically resolved against test-org
+- [ ] Decision #15 (all standard types supported) confirmed by Q1 + Q10 validation — no contradiction with open questions
+- [ ] State-flip prominence: pre-flight #5 + inline status (#16) + failure mode #6 + Relationship section
+- [ ] Schema validation handles format mismatch case (don't fail when agent picks a format not in local files)
+- [ ] Multi-turn is opt-in, capped at 5 turns, single-response report semantics
+- [ ] 90s timeout + 5s "waiting" indicator for long-running agents
+- [ ] Always-cleanup pattern in skill prompt
+- [ ] `result[].value` JSON.parse step documented in rendering logic
+- [ ] No `externalClientId` in any sample request
+
+---
+
 ## Changelog
 
-- **v1 (2026-05-13):** Expanded from initial draft. Added: connection selection (Question 3), surfaceType mapping for all connection types, ECA setup guide, interactive multi-turn mode, response format rendering, multi-version agent support, credential handling rules. Dropped schema validation from v1 scope (AiResponseFormat not reliably retrievable). 6 open questions to validate before building.
-- **v2 (2026-05-13):** Reviewer pass. Updated Decision #10 from "no schema validation in v1" to "local-first schema fallback, structural validation only" — catches malformed responses without adding a JSON Schema library dependency, falls back gracefully when local files aren't present. Added Open Question #7: whether to keep interactive multi-turn mode (Decision #3) or simplify to single-message-per-run for v1. State flip (deactivated → active) and always-cleanup-on-exit were already covered in v1 — confirmed both still in place.
+- **v1 (2026-05-13):** Initial draft. 10 failure modes, 4-question input flow, 3-check test sequence, markdown + JSON output. Two open questions on session cleanup and secret handling.
+- **v2 (2026-05-13):** Reviewer pass. Updated Decision #10 from "no schema validation in v1" to "local-first schema fallback, structural validation only." Added Open Question #7: multi-turn vs single-message-per-run. State flip and always-cleanup confirmed.
+- **v3 (2026-05-13 — final):** Three rounds of reviewer feedback consolidated + all 10 open questions empirically validated against test-org.
+  - **Multi-turn (Q7) resolved:** opt-in, 5-turn cap, single-response report semantics. ~1h impl (Decision #3 updated).
+  - **Schema validation (Decision #10) refined:** match by triggered format name, skip validation if format not in local files (don't fail), report which file was used as schema source.
+  - **surfaceType mapping eliminated:** Q1 + Q10 validation showed the API accepts all surface type values. Pass-through, no mapping. Decision #15 holds.
+  - **`externalClientId` removed entirely:** Q2 confirmed it's not a recognized field. Failure mode #7 lists the 14 valid fields.
+  - **Long-response handling added (Decision #17):** 90s curl timeout + 5s "waiting" indicator (Q8).
+  - **`result[].value` parsing documented:** string-encoded JSON requires nested parse (Q9 bonus finding).
+  - **Standard connection semantics added (Decision #12):** empty `result[]` on standard connections is expected, not a warning.
+  - **Inline agent status (Decision #16):** "Found agent X (active — ready to test)" right after retrieval prevents whipsaw between diagnose and test.
+  - **Pre-flight error message tweak:** explicit reference to diagnose-connection ("if you just ran diagnose-connection or deployed changes, you may have deactivated it").
+  - **Effort revised:** 14.5h with multi-turn, 12.5h without. Down from 15-17h (v2) because Q-validation block is no longer needed.
+  - **Reviewer sign-off checklist added** for the final review pass.
+  - **Status: Build-ready.** No more open questions. Pending only sign-off from reviewers.
