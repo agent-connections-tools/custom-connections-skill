@@ -59,7 +59,7 @@ Retrieve the agent bundle:
 cd "$WORK_DIR" && sf project retrieve start --metadata "GenAiPlannerBundle:$AGENT_NAME" --target-org $ORG_ALIAS --output-dir retrieved/
 ```
 
-If the retrieve fails because the name doesn't match:
+**Important:** The retrieve may return `Status: Succeeded` even when the agent isn't found — check the output for a Warnings table containing "cannot be found." Don't rely on the exit code alone. If the output contains "cannot be found" OR if no `.genAiPlannerBundle` file exists in the output directory:
 - Run `sf data query --query "SELECT DeveloperName FROM BotDefinition" --target-org $ORG_ALIAS` to show available agents
 - Ask the user to pick the correct one
 
@@ -184,9 +184,13 @@ cd "$WORK_DIR" && sf project deploy start --metadata-dir "$DRYRUN_DIR" --target-
 
 The dry-run treats the existing surface as a "Changed" update — it won't create a duplicate or overwrite anything. If a referenced format doesn't exist, the error message names the specific missing format: `"Response format does not exist in org: <name>"`.
 
+**Batch first, then fallback:** Put ALL format references into one dry-run deploy (the single-format case is just a batch of one).
+
 If the dry-run succeeds → passed: "All response formats are valid and deployed"
-If it fails with `"Response format does not exist in org: <name>"`:
-- Read the FULL error output for ALL format-specific errors
+
+If the batch dry-run fails:
+- Read the FULL error output. If it mentions specific format names (`"Response format does not exist in org: <name>"`), fall back to **individual dry-runs per format** to pinpoint exactly which ones are missing.
+- If the error does NOT mention a format name (e.g., a surface-level XML issue), report it as a surface-level warning — don't fall through to individual format checks that would all fail for the same reason.
 - Report each missing format: "Response format '[name]' is missing from your org. Redeploy it with `sf project deploy start --metadata-dir`."
 
 **Check: Response format JSON schemas (local files only)**
@@ -194,7 +198,7 @@ If it fails with `"Response format does not exist in org: <name>"`:
 - For each file found, check that the `<input>` field contains valid JSON
 - If malformed → failed: "The JSON schema in '[filename]' has a syntax error: [detail]. Fix the JSON inside the `<input>` tag."
 - If valid → passed
-- If no local files found → info: "I couldn't check your response format JSON schemas because there are no local .aiResponseFormat files in this directory. If you have the source files, run this skill from that directory."
+- If no local files found → this check is **skipped** (not passed). Don't include it in the pass count. Add an info note after the checklist: "I couldn't check your response format JSON schemas because there are no local .aiResponseFormat files in this directory. If you have the source files, run this skill from that directory."
 
 ## Step 6: Show the results
 
