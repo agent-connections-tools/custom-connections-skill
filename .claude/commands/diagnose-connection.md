@@ -37,6 +37,7 @@ sf org display --target-org $ORG_ALIAS
 # Check 3b: If there's a sfdx-project.json in the CURRENT WORKING DIRECTORY (not the skill's directory),
 # check the sourceApiVersion field
 # If pinned below 62.0 → "Your org supports v62.0+ but your local project is pinned to vXX.0 in sfdx-project.json — this can cause problems. Update the sourceApiVersion in that file to 62.0 or higher."
+# If no sfdx-project.json exists in the CWD → skip this check entirely (don't report it as passed or include it in the results)
 ```
 
 Check 4 (permissions) gets verified when we try to retrieve the agent in Step 3. If that fails, say: "I couldn't pull your agent's metadata. Check that your user has the right permissions: **Setup → Profiles → your profile → 'Modify Metadata Through Metadata API Functions'** should be enabled."
@@ -59,7 +60,13 @@ Retrieve the agent bundle:
 cd "$WORK_DIR" && sf project retrieve start --metadata "GenAiPlannerBundle:$AGENT_NAME" --target-org $ORG_ALIAS --output-dir retrieved/
 ```
 
-**Important:** The retrieve may return `Status: Succeeded` even when the agent isn't found — check the output for a Warnings table containing "cannot be found." Don't rely on the exit code alone. If the output contains "cannot be found" OR if no `.genAiPlannerBundle` file exists in the output directory:
+**Important:** The retrieve returns exit code 0 even when the agent isn't found — it shows `Status: Succeeded` with a Warnings table. Don't rely on the exit code. After the retrieve, always verify the bundle was actually created:
+
+```bash
+ls retrieved/genAiPlannerBundles/$AGENT_NAME/$AGENT_NAME.genAiPlannerBundle 2>/dev/null
+```
+
+If the file doesn't exist (or the output contains "cannot be found"):
 - Run `sf data query --query "SELECT DeveloperName FROM BotDefinition" --target-org $ORG_ALIAS` to show available agents
 - Ask the user to pick the correct one
 
@@ -211,6 +218,8 @@ Start the report with a single line about the most important thing to fix:
 
 ### Report format
 
+**Counting rule:** The summary line counts **top-level checks only** — the same checks listed in the JSON report. Sub-details under a connection (like "deployed ✓, adaptive ✓, formats ✓") are informational detail, NOT separate checks. The summary count must match the JSON `passed`/`warnings`/`failed` counts exactly.
+
 ```
 === Connection Health Report: <agent display name> ===
 
@@ -220,10 +229,12 @@ YOUR CONNECTIONS
   1. Telephony — ✓ Standard connection, no issues
   2. Web Chat — ✓ Standard connection, no issues
   3. Email — ✓ Standard connection, no issues
-  4. BaxterCreditUnion_BCU01 (Custom) — ✓ All checks passed
-     - Connection deployed: ✓
-     - Adaptive responses: ✓ Enabled
-     - Response formats: ✓ 2 found and validated
+  4. BaxterCreditUnion_BCU01 (Custom)
+     ✓ Connection deployed in org
+     ✓ Adaptive responses enabled
+     ✓ Only 1 custom connection (within limit)
+     ✓ No duplicate connections
+     ✓ 2 response formats found and validated
 
 WARNINGS (N)
   ⚠ <plain English description>
@@ -258,7 +269,7 @@ Save to `/tmp/diagnose-report.json` and tell the user where it is:
   "checks": [
     {
       "name": "<check_name>",
-      "status": "passed|warning|failed",
+      "status": "passed|warning|failed|skipped",
       "detail": "<plain English detail>",
       "fix": "<fix instruction, only for warning/failed>"
     }
