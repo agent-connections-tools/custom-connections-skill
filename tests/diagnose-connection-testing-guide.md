@@ -127,7 +127,7 @@ Note: Pre-flight environment checks (CLI installed, org connected, API version �
 - Active agent warning
 - JSON report saved to `/tmp/diagnose-report.json`
 - Total: 11 passed, 1 warning, 0 issues, 1 skipped (see check inventory)
-- **Critical:** The summary line in the terminal (e.g., "12 passed, 1 warning, 0 issues") must match the JSON report's `passed`/`warnings`/`failed` counts exactly
+- **Critical:** The summary line in the terminal (e.g., "11 passed, 1 warning, 0 issues") must match the JSON report's `passed`/`warnings`/`failed` counts exactly
 
 **Review for:**
 - Are all messages in plain English? No metadata jargon?
@@ -347,6 +347,7 @@ cd examples/acme-portal && /project:diagnose-connection
 - **One custom connection per agent** — this is a platform limit. The skill flags it as an issue if multiple are found.
 - **Local JSON schema check depends on CWD** — only works if the user runs the skill from a directory containing `.aiResponseFormat` source files.
 - **Multi-version bundle warning is untestable** — all agents in test-org have a single version (v1). The version mismatch warning (plan says: "Agent has N versions — active: vX, most recent: vY") can't be triggered. To test this, you'd need to create an agent with multiple versions in the org. Acknowledged as untested.
+- **Batch dry-run fallback (Scenario 8) is tested via reasoning only** — Option A confirms the error message is parseable and names the missing format. Option B (deploying a broken surface as a permanent test fixture) would allow end-to-end verification but hasn't been set up. The fallback logic (batch fails → individual dry-runs) is validated by confirming the error output structure, not by running the full fallback path.
 - **Mid-run permission failure is untestable on demand** — the plan says "mark that check as skipped with reason, continue remaining checks." This requires a user profile that passes pre-flight but lacks specific metadata permissions. Can't be reliably triggered in test-org where the user has full admin access. Acknowledged as untested.
 - **sfdx-project.json version check is never exercised** — the custom-connections-skill repo has no `sfdx-project.json` in its root, so pre-flight check 3b always skips. To test the "pinned version too low" warning, you'd need to run the skill from a directory that has a `sfdx-project.json` with `sourceApiVersion` below 62.0.
 - **Temp directory cleanup may be blocked in sandboxed environments** — when testing via agent mode or restricted shells, `rm -rf $WORK_DIR` may be denied by sandbox permissions. This is expected behavior in restricted environments, not a skill bug. In a normal terminal session, cleanup works fine.
