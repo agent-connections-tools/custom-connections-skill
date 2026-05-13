@@ -1,8 +1,8 @@
-# diagnose-connection — Skill Plan (v8)
+# diagnose-connection — Skill Plan (v9)
 
 **Author:** Abhi Rathna
 **Date:** 2026-05-12
-**Status:** Ready to build after validating 2 open questions
+**Status:** Ready to build — all open questions validated against test-org
 
 ---
 
@@ -118,6 +118,8 @@ The skill produces two output formats from every run:
 ```
 === Connection Health Report: Agentforce_Service_Agent ===
 
+▶ Top priority: Redeploy AcmePortalTimePicker_ACME01 (missing format blocks custom connection)
+
 PASSED (7)
   ✓ Agent bundle retrieved (v2)
   ✓ Agent is deactivated (safe to modify)
@@ -200,6 +202,8 @@ sf project retrieve start --metadata "GenAiPlannerBundle:Agentforce_Service_Agen
 | `sf project retrieve start --manifest package.xml` | CLI registry blocks it |
 | `sf org list metadata-types` | AiResponseFormat IS listed — the org knows about it |
 | `sf project deploy start --metadata-dir` | **Works** — bypasses CLI registry |
+| `sf project deploy start --metadata-dir ... --dry-run` (existing surface) | **Works** — treated as "Changed" update, returns `"Response format does not exist in org: <name>"` for missing formats |
+| `sf data query "SELECT DeveloperName FROM BotDefinition"` | **Works** — names match GenAiPlannerBundle names exactly |
 
 **Chosen approach: dry-run deploy validation.**
 
@@ -211,11 +215,11 @@ To check if response formats exist, re-deploy the surface that's already in the 
 
 Using the real surface metadata (not a generated stub) avoids false signals from malformed generated XML. The dry-run validates exactly what's deployed.
 
-**Open question (must validate before building):** What happens when you dry-run deploy a surface that already exists in the org? If it succeeds (treated as a no-op update), this approach works cleanly. If it fails (duplicate error), we need to generate a temporary surface with a unique name that references the same formats. See "Open Questions" section.
+**Validated 2026-05-12 against test-org:** Dry-run deploy of an existing AiSurface succeeds — treated as a "Changed" update, not a duplicate error. When a referenced format doesn't exist, the error is cleanly parseable: `"Response format does not exist in org: DOES_NOT_EXIST_FORMAT"` — it names the specific missing format. No temp surface workaround needed.
 
 **Latency optimization:** Always batch first. Put all format references into a single dry-run deploy — the single-format case is just a batch of one. If the batch succeeds, all formats exist (one round-trip). If it fails, fall back to individual dry-runs per format to pinpoint which one is missing. No conditional path, no threshold — batch is the default.
 
-**False positive limitation:** Dry-run deploy is the best available signal, not ground truth. In rare cases (failure mode #7 — "Unchanged" status corruption), a format may pass dry-run validation but still not function at runtime. The skill notes this in the report footer: "This diagnostic catches common configuration errors. If all checks pass but the connection still doesn't work, the issue may be runtime-specific — test with `test-connection` or check Agent Builder directly."
+**Known blind spot — "phantom format" corruption:** Dry-run deploy is the best available signal, not ground truth. In failure mode #7's "Unchanged" status variant, a format may pass dry-run validation (the org thinks it exists) but not function at runtime. This skill catches misconfiguration, not platform corruption. The report footer and the "What It Does NOT Do" section both call this out explicitly. For corruption cases, the fix is to redeploy with fresh names.
 
 ### Version Detection
 
@@ -270,7 +274,7 @@ Same repo, same pattern. User runs `/project:diagnose-connection` from the repo 
 
 ### Namespace
 
-Skill command is `/project:diagnose-connection` for now. When the `/agentforce:` namespace is adopted across the skill family (per the skills repo v2 plan), both skills will migrate together.
+Skill command is `/project:diagnose-connection`. Both skills in this repo use `/project:` today (`build-custom-connection`, `diagnose-connection`). When the `/agentforce:` namespace is adopted across the skill family, both migrate together — but that's a one-time rename, not a reason to adopt a different namespace prematurely.
 
 ---
 
@@ -282,6 +286,7 @@ Skill command is `/project:diagnose-connection` for now. When the `/agentforce:`
 - **Does not modify any org metadata.** Read-only (dry-run deploys don't write), safe to run against production orgs.
 - **Does not audit multiple agents.** v1 is single-agent. Multi-agent audit is v2.
 - **Does not produce HTML reports.** Markdown + JSON only in v1. HTML for sharing is a v2 candidate.
+- **Does not detect "phantom format" org corruption** — formats that pass dry-run validation but don't function at runtime (e.g., "Unchanged" deploy status but format never actually created). This skill catches misconfiguration, not platform corruption. For corruption: redeploy with fresh names or contact Salesforce support.
 
 ---
 
@@ -324,12 +329,12 @@ Skill command is `/project:diagnose-connection` for now. When the `/agentforce:`
 
 ## Open Questions
 
-Two questions must be validated against test-org before building:
+**All resolved.** Both blocking questions validated against test-org on 2026-05-12:
 
-| # | Question | Why It Matters | Fallback If It Fails |
-|---|----------|---------------|---------------------|
-| 1 | **Does dry-run deploy of an existing AiSurface succeed or fail?** | The format validation strategy uses the real surface XML from the bundle. If dry-run treats it as a duplicate and errors, we need to generate a temporary surface with a unique name that references the same formats instead. | Generate temp surface: `DiagnoseCheck_<timestamp>.aiSurface` referencing the same formats, dry-run deploy it, then discard. |
-| 2 | **Does `BotDefinition.DeveloperName` match the `GenAiPlannerBundle` name exactly?** | The skill's fallback help message tells users to run `SELECT DeveloperName FROM BotDefinition` to find their agent name. That name must work as the argument to `GenAiPlannerBundle:<name>` retrieve. If there's a mapping or transformation, the skill needs to handle it. | If names don't match, document the exact mapping (BotDefinition.DeveloperName → GenAiPlannerBundle name) and add a transformation step in the skill. |
+| # | Question | Result |
+|---|----------|--------|
+| 1 | **Does dry-run deploy of an existing AiSurface succeed or fail?** | **Succeeds** — treated as "Changed" update, not a duplicate. Error on missing format is cleanly parseable: `"Response format does not exist in org: <name>"`. No temp surface workaround needed. |
+| 2 | **Does `BotDefinition.DeveloperName` match the `GenAiPlannerBundle` name exactly?** | **Yes** — `BotDefinition.DeveloperName` returns `Agentforce_Service_Agent`, which works directly as `GenAiPlannerBundle:Agentforce_Service_Agent` in retrieve. No mapping needed. |
 
 **Previously resolved:**
 - Tooling API availability → not available, using dry-run deploy
@@ -349,3 +354,4 @@ Two questions must be validated against test-org before building:
 - **v6 (2026-05-12):** Fifth review — dropped wildcard listing (user provides agent name directly, same as build-custom-connection), cut HTML output from v1, grouped failure modes by level (bundle/surface/environment), merged effort estimate line items (10.5h), use real surface metadata for dry-run instead of generated stub, added 2 open questions to validate before building.
 - **v7 (2026-05-12):** Sixth review — pre-flight now checks `sfdx-project.json` pinned API version, batch dry-runs are the default path (not conditional).
 - **v8 (2026-05-12):** Seventh review — pre-flight checks CWD sfdx-project.json not skill directory, testing estimate bumped to 4.5h (total 12h), fixed open question #2 phrasing to match actual question, added batch dry-run error heuristic (format-name vs surface-level errors).
+- **v9 (2026-05-12):** Eighth review + empirical validation — both open questions validated against test-org (dry-run succeeds on existing surface, BotDefinition names match bundle names). Added "top priority" line to report output. Corruption blind spot called out prominently in "What It Does NOT Do". Namespace decision documented (`/project:` now, migrate together later). All open questions resolved.
