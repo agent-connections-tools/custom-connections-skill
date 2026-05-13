@@ -1,0 +1,382 @@
+# update-connection — Skill Plan (v1)
+
+**Author:** Abhi Rathna
+**Date:** 2026-05-13
+**Status:** Draft for review
+
+---
+
+## What This Skill Does
+
+Modifies an existing custom connection without rebuilding it from scratch. The skill pulls the connection's current state from the org, shows the user what's already deployed, lets them pick what to add, then deploys the change without clobbering the existing formats.
+
+The fourth verb in the skill family:
+
+```
+build-custom-connection      diagnose-connection       update-connection         test-connection
+       (create)          →     (verify config)     →    (modify in place)    →    (verify runtime)
+   "Deploy new metadata"    "Is it wired correctly?"  "Add formats safely"    "Does it actually work?"
+```
+
+V1 supports **one verb only — adding a response format**. The architecture (retrieve → parse → diff → redeploy) is built to extend cleanly to remove/modify operations in v2 without rework.
+
+---
+
+## Who It's For
+
+**Primary persona:** Salesforce Admins who built a custom connection with `build-custom-connection` and now want to add a new format (date picker, image carousel, etc.) without re-running build from scratch and risking duplication or clobbering.
+
+**Secondary persona:** Developers iterating on a connection's response formats during agent development.
+
+---
+
+## The State-Flip Map (full skill family)
+
+The state requirement is now a first-class concept across the family:
+
+| Skill | Agent state required | Why |
+|------|------|------|
+| `build-custom-connection` | **Deactivated** | Deploys bundle metadata; active agents reject metadata updates |
+| `diagnose-connection` | **Deactivated** | So the user can fix what the diagnostic surfaces without re-deactivating |
+| `update-connection` (this skill) | **Deactivated** | Deploys bundle metadata; same constraint as build |
+| `test-connection` | **Active** | Sends real messages through the live agent |
+
+**The user workflow:** deactivate → build/diagnose/update freely → activate → test → if something's wrong, deactivate again and loop. This skill belongs in the deactivated phase of that cycle.
+
+The skill calls out the state inversion the same way `test-connection` does: explicit reference to the other skills, plain-English fix instruction, status display inline before any deploy.
+
+---
+
+## Why "stateful merge" is the architectural challenge
+
+The other skills in the trio are stateless:
+- `build-custom-connection` generates files from scratch
+- `diagnose-connection` reads org state but never writes
+- `test-connection` exercises the runtime, doesn't touch metadata
+
+This skill is the first that **reads org state and writes back to it**. The hard part isn't "deploy a new file" — it's "deploy a new file without breaking what's already there."
+
+Specifically: the AiSurface XML lists every response format the connection uses. If you regenerate the surface from scratch (the build skill's pattern), you can easily drop a format the user previously deployed manually or via a separate flow. The skill must:
+
+1. Retrieve the current `AiSurface` XML
+2. Parse the existing `<responseFormats>` entries
+3. Generate the new format's `.aiResponseFormat` file
+4. Append (not replace) the new format to the surface's `<responseFormats>` list
+5. Deploy both files together
+
+Any operation that modifies an existing connection — add, remove, swap — needs this same retrieve-parse-merge-write loop. Building it once correctly for "add" means v2's "remove" and "modify" verbs slot in cleanly.
+
+---
+
+## How It Works
+
+### Inputs (4 questions, asked one at a time)
+
+1. **What's your org alias?** Same as the other skills.
+
+2. **What's your agent's developer name?** Help them find it (Setup → Agents OR `sf data query`).
+
+3. **Which custom connection do you want to update?** The skill retrieves the agent's bundle (with multi-version fallback, same as diagnose) and lists every custom connection on the agent:
+   ```
+   1. AcmePortal_ACME01 (custom) — currently has 2 response formats
+   2. BaxterCreditUnion_BCU01 (custom) — currently has 3 response formats
+   ```
+   Standard connections (Telephony, etc.) are not listed — v1 doesn't support them. If the agent has no custom connection, the skill exits early with a message: "This agent has no custom connections. Use `/project:build-custom-connection` to create one."
+
+4. **What format do you want to add?** Show the same options as `build-custom-connection`:
+   - Text choices (2-7 clickable options)
+   - Choices with images (product cards, listings with thumbnails)
+   - Time picker (select a time slot)
+   - Custom JSON (describe the structure you want)
+
+   The skill explains what's already on the connection so the user doesn't add a duplicate:
+   > "Your AcmePortal_ACME01 connection already has Text Choices and Choices with Images. Adding the same format again would create a duplicate. Pick one of the others, or pick Custom JSON to define a new shape."
+
+### Pre-flight Checks
+
+Run these before any retrieve. Stop early on failure.
+
+1. **Salesforce CLI installed** — `sf --version`
+2. **Org connected** — `sf org display --target-org $ORG_ALIAS`
+3. **API version ≥ 62.0** — from org display
+4. **User can retrieve metadata** — caught when the bundle retrieve runs
+
+> **State requirement:** The agent must be **deactivated** before this skill runs. Same as `build-custom-connection` and `diagnose-connection`. After deploying the change, the user reactivates the agent and runs `test-connection` to verify the new format works.
+
+### Stateful Merge Sequence
+
+This is the core of the skill. Eight steps:
+
+**1. Retrieve the agent bundle** (same pattern as diagnose-connection's multi-version fallback):
+```bash
+sf project retrieve start --metadata "GenAiPlannerBundle:$BUNDLE_NAME" --target-org $ORG_ALIAS --output-dir retrieved/
+```
+
+**2. Confirm the agent is deactivated:** query `BotVersion` for `Status = 'Active'`. If active, stop with the state-flip message. **Note:** the inversion is *to* `test-connection` (which needs active), not *from* it — same direction as build/diagnose.
+
+**3. Parse the bundle XML** to find the chosen `<plannerSurfaces>` entry and extract the surface name (e.g., `AcmePortal_ACME01`).
+
+**4. Discover what's currently on the surface.** This is the hardest step in the skill. The bundle XML tells us the surface *name* (e.g., `AcmePortal_ACME01`) but **not** its current `<responseFormats>` list. AiSurface metadata can't be retrieved by name through the CLI (the CLI registry blocks it — confirmed during `diagnose-connection` build).
+
+The skill reuses `diagnose-connection`'s two-method approach to infer the current state:
+
+**Method A — naming convention scan (fast, works for skill-built connections):**
+- List all `AiResponseFormat` metadata in the org: `sf org list metadata --metadata-type AiResponseFormat --target-org $ORG_ALIAS`
+- Filter by the surface's naming prefix and suffix. E.g., for `AcmePortal_ACME01`, look for `AcmePortal*_ACME01.aiResponseFormat`.
+- If the connection was built with `build-custom-connection`, the naming convention holds and Method A finds every format. Fast.
+- If the connection was built by hand or with non-standard naming, Method A misses formats. Falls back to Method B.
+
+**Method B — dry-run deploy probe (slower, more robust):**
+- Build a temporary surface XML that references the formats from Method A's candidate list
+- Run `sf project deploy start --metadata-dir <temp> --target-org $ORG_ALIAS --dry-run`
+- The dry-run output names any formats that don't exist (`"Response format does not exist in org: <name>"`). Anything not flagged exists.
+- Use the result as the authoritative current-formats list.
+
+**Why both methods:** Method A handles the 95% case (skill-built connections) quickly. Method B catches the rare case where a connection has manually-named formats. Same pattern proven in `diagnose-connection`.
+
+**Limitation worth surfacing in the report:** Neither method can retrieve the *raw XML* of the existing AiSurface — only the list of formats it references. The skill regenerates the AiSurface XML from scratch each deploy, copying the existing format list and appending the new one. This means any custom fields the user added to the surface XML by hand (e.g., custom `<description>` text) will be lost. v1 acknowledges this as a known limitation; v2 could address it if the CLI registry adds AiSurface support.
+
+**5. Generate the new format's `.aiResponseFormat` file** using the same templates as `build-custom-connection`. The file follows the existing naming convention (`<ClientName><FormatType>_<SurfaceId>`).
+
+**6. Generate the merged AiSurface XML.** Take the existing `<responseFormats>` entries from the parsed surface metadata, append the new format's developer name, write the merged XML.
+
+**7. Build the package and deploy:**
+```bash
+sf project deploy start --metadata-dir <merged-output> --target-org $ORG_ALIAS
+```
+
+**8. Verify the new format is in the deployed surface** by re-running the dry-run probe. If the new format name appears in the list, deploy succeeded.
+
+### Output
+
+Two formats, same pattern as the other skills.
+
+**1. Markdown (terminal):**
+
+```
+=== Connection Update Report: AcmePortal_ACME01 ===
+
+▶ Top result: ✓ Added 'Time Picker' format. Connection now has 3 formats.
+
+PRE-FLIGHT
+  ✓ Salesforce CLI installed
+  ✓ Org 'my-org' connected
+  ✓ Agent is deactivated (safe to deploy)
+  ✓ Bundle retrieved (v2)
+
+CURRENT STATE (before update)
+  Connection: AcmePortal_ACME01
+  Existing formats: 2
+    1. AcmePortalChoices_ACME01 (Text Choices)
+    2. AcmePortalChoicesWithImages_ACME01 (Choices with Images)
+
+CHANGE
+  Add: AcmePortalTimePicker_ACME01 (Time Picker)
+
+DEPLOY
+  ✓ AcmePortalTimePicker_ACME01.aiResponseFormat — created
+  ✓ AcmePortal_ACME01.aiSurface — updated (3 response formats)
+  ✓ Deploy succeeded
+
+NEW STATE (after update)
+  Connection: AcmePortal_ACME01
+  Total formats: 3
+    1. AcmePortalChoices_ACME01 (Text Choices)
+    2. AcmePortalChoicesWithImages_ACME01 (Choices with Images)
+    3. AcmePortalTimePicker_ACME01 (Time Picker) — NEW
+
+=== Summary: 1 format added, 0 modified, 0 removed ===
+
+Next steps:
+  1. Reactivate your agent (Setup → Agents → select your agent → Activate)
+  2. Run /project:test-connection to verify the new format works at runtime
+```
+
+**2. JSON (saved to `/tmp/update-connection-report.json`):**
+
+```json
+{
+  "$schema": "update-connection-v1",
+  "agent": "Customer_Support_Agent",
+  "bundleVersion": "v2",
+  "connection": "AcmePortal_ACME01",
+  "operation": "add",
+  "timestamp": "2026-05-13T...",
+  "before": {
+    "formatCount": 2,
+    "formats": ["AcmePortalChoices_ACME01", "AcmePortalChoicesWithImages_ACME01"]
+  },
+  "after": {
+    "formatCount": 3,
+    "formats": ["AcmePortalChoices_ACME01", "AcmePortalChoicesWithImages_ACME01", "AcmePortalTimePicker_ACME01"]
+  },
+  "added": ["AcmePortalTimePicker_ACME01"],
+  "removed": [],
+  "modified": [],
+  "deployStatus": "passed"
+}
+```
+
+The before/after structure is intentional — it makes the diff explicit and gives CI consumers a way to assert "exactly N formats were added, nothing was removed."
+
+---
+
+## Non-Technical UX Requirements
+
+Same bar as the other skills. Specifically:
+
+- **Plain English everywhere.** No "AiSurface", "AiResponseFormat", "plannerSurfaces", "merge XML" in user-facing output. Translate to: "your connection", "your response format", "your agent's configuration".
+- **One question at a time.** 4 questions, never dumped together.
+- **Show before/after explicitly.** The user must see "you currently have 2 formats; this will add a 3rd" before any deploy. No silent changes.
+- **Fix instructions use Setup → navigation paths.** Same standard as build/diagnose.
+- **Brief status updates** during long operations: "Pulling your current connection state...", "Generating new format file...", "Deploying...".
+- **README and GUIDE updates required.** New "Quick Start: Updating a connection" section in README; new Step 12 in GUIDE.
+
+---
+
+## What It Does NOT Do (v1 scope)
+
+- **Does not remove response formats.** v2 candidate. Adding doesn't risk breaking deployed sessions; removing does (an active session might be using the format you're about to delete).
+- **Does not modify response format schemas.** v2 candidate. Schema changes are riskier than additions — they can break clients that already parse the old shape.
+- **Does not change surface-level instructions.** v2 candidate. Pure text change, low risk, but adds a second verb to v1's scope.
+- **Does not work on standard connections** (Telephony, Web Chat, Email, Messaging). Standard connections don't have user-defined response formats — there's nothing to add. v1 is custom-only.
+- **Does not auto-rebuild the agent bundle.** The skill modifies the AiSurface and AiResponseFormat metadata. If the user has separately updated the GenAiPlannerBundle (e.g., to add a new topic), this skill doesn't touch that.
+- **Does not preserve hand-edited fields on the AiSurface XML.** The CLI can't retrieve AiSurface XML by name, so the skill can only know the surface's *name* and its *list of response formats* — not its full XML body. If the user manually edited the surface's `<description>` or other fields outside what `build-custom-connection` generates, those edits are lost when the skill regenerates the surface. The report flags this explicitly so users with hand-edited surfaces aren't surprised. v2 may address if/when the CLI registry adds AiSurface support.
+- **Does not deactivate the agent.** Same pattern as build/diagnose — the user deactivates manually before running. The skill stops with a clear message if it finds an active agent.
+- **Does not test the new format at runtime.** That's `test-connection`'s job. This skill ends at "deploy succeeded" — verification belongs in the next step.
+
+---
+
+## Technical Approach
+
+### Reuse from existing skills
+
+| Component | Source | Notes |
+|---|---|---|
+| Bundle retrieve + multi-version fallback | `diagnose-connection` Step 3 | Identical logic; reuse the pattern |
+| Method A: format name discovery (naming convention scan) | `diagnose-connection` Step 9 (Method A) | List `AiResponseFormat` metadata, filter by surface prefix/suffix |
+| Method B: format existence verification (dry-run probe) | `diagnose-connection` Step 9 (Method B) | Use Method B to confirm Method A's candidates actually exist |
+| `.aiResponseFormat` file templates | `build-custom-connection` | Same XML scaffolding for the 4 format types |
+| AiSurface XML generation | `build-custom-connection` | Same template, but populated with the existing format list (from Method A+B) plus the new format appended |
+| Deploy via `--metadata-dir` | `build-custom-connection` deploy.sh | Same CLI command |
+| Agent active/inactive detection | `diagnose-connection` Step 4 | Same `BotVersion` query |
+
+**The single new piece of logic** in this skill is the merge step itself: take the existing format list (output of Method A+B), append the new format, regenerate the AiSurface XML. Everything else is composition of patterns already proven in the trio.
+
+The only genuinely new logic is the **merge step**: parsing existing `<responseFormats>` entries and appending the new one without duplicating.
+
+### Where It Lives
+
+```
+custom-connections-skill/
+├── .claude/commands/
+│   ├── build-custom-connection.md     # existing
+│   ├── diagnose-connection.md         # existing
+│   ├── test-connection.md             # existing
+│   └── update-connection.md           # new
+```
+
+Same repo. Trio becomes a quartet.
+
+### Skill Prompt Structure
+
+```
+# Update Custom Connection
+## Your role
+## Step 1: Gather input (org, agent, connection, format to add)
+## Step 2: Pre-flight checks (CLI, org, API version, agent deactivated)
+## Step 3: Retrieve and parse current state (bundle + surface dry-run probe)
+## Step 4: Show current state to the user (existing formats, deduplication warning)
+## Step 5: Confirm the user wants to proceed with the planned change
+## Step 6: Generate the new format file
+## Step 7: Generate the merged AiSurface XML (existing formats + new one)
+## Step 8: Deploy via --metadata-dir
+## Step 9: Verify the new format is in the deployed surface (re-probe)
+## Step 10: Compile and display results (markdown + JSON)
+## Output templates
+## Error handling rules
+## Important rules
+```
+
+---
+
+## Effort Estimate
+
+| Task | Hours |
+|------|-------|
+| Skill prompt (`.claude/commands/update-connection.md`) | ~4 |
+| Stateful merge logic (parse existing surface, generate merged XML) | ~2 |
+| Deduplication check (warn user before adding a format that already exists) | ~1 |
+| JSON output template + before/after diff structure | ~0.5 |
+| Testing against test-org (add each format type, verify before/after, dedup detection, deactivation enforcement) | ~3 |
+| Documentation (README + GUIDE updates) | ~1 |
+| **Total** | **~11.5h** |
+
+**Risk margin:** add 2h if the dry-run probe reveals edge cases when the surface has unusual existing formats (e.g., a format the user added manually with non-standard naming).
+
+---
+
+## Decisions Made
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| 1 | **Stateful merge architecture** | Building "pull current state + merge change + deploy" once means add/remove/modify all share the same architecture. Three sibling skills would each reimplement the pull-and-parse step. |
+| 2 | **V1 supports add only** | Adding doesn't break deployed sessions. Removing and modifying do. Ship the safe verb first; layer risky verbs onto the same architecture in v2. |
+| 3 | **Custom connections only** | Standard connections don't have user-defined response formats. Nothing to update there. Trying to extend would expand scope without adding value. |
+| 4 | **Show before/after explicitly** | The user must see what exists before they confirm a change. Silent edits are how connections get clobbered. The before/after diff in both markdown and JSON makes the change auditable. |
+| 5 | **Deduplication check before deploy** | If the user picks a format type that already exists on the connection (e.g., adding a second "Text Choices"), warn them. This is a near-certain user mistake — not something we silently allow. |
+| 6 | **Reuse retrieve+parse from diagnose-connection** | Don't reinvent the bundle retrieve, the multi-version fallback, or the surface dry-run probe. Those are the exact same operations. |
+| 7 | **Reuse format templates from build-custom-connection** | Same XML scaffolding for the 4 format types. The templates are the spec — re-using them keeps the family coherent. |
+| 8 | **Deactivated agent required** | Same as build and diagnose. Active agents reject metadata updates. The state-flip table now has 3 deactivated skills (build/diagnose/update) and 1 active skill (test). |
+| 9 | **Two output formats (markdown + JSON)** | Same pattern as the rest of the family. Markdown for terminal, JSON for CI/CD. Before/after diff in both. |
+| 10 | **Same `/project:` namespace** | `/project:update-connection`. Migrates to `/agentforce:` with the family later. |
+| 11 | **`$schema: "update-connection-v1"`** | Output schema versioned independently of the plan. Same convention as test-connection. |
+
+---
+
+## Open Questions
+
+| # | Question | Why It Matters | Validation Plan |
+|---|----------|---------------|----------------|
+| 1 | **Does Method A (naming-convention scan) reliably find all formats for a surface?** | The skill's Step 4 depends on Method A's accuracy. If Method A misses a format that actually exists (e.g., a format with non-conventional naming), the merge logic generates a surface XML missing that format — clobbering it on deploy. Method B catches missing-from-org cases but not present-in-org-but-missed-by-Method-A cases. | Validate against test-org's BaxterCreditUnion_BCU01 (skill-built, naming convention holds) AND TestEscalation's MicrosoftTeams (non-conventional naming). Document the gap. If Method A is unreliable, we need a third detection approach before v1 ships. |
+| 2 | **What does the deploy step return when the existing surface is "updated" with the same format list plus a new one?** | If the API treats "surface XML with 2 existing formats + 1 new format" as a no-op for the existing 2 and a "Created" for the new 1, we know the merge worked. If it treats the whole surface as "Changed" without distinguishing, we need a different verification approach. | Add a format to BCU_Test's BaxterCreditUnion_BCU01 connection in test-org via the skill. Inspect the deploy output. Document. |
+| 3 | **What's the right deduplication behavior — silent skip, warn, or hard error?** | If the user asks to add Text Choices when Text Choices already exists, we have three options: (a) warn and ask "are you sure? this will overwrite", (b) hard-error "format already exists, refusing to deploy", (c) silently no-op. (a) is most flexible but adds a UX branch. (b) is safest but may frustrate users iterating. | Decide based on observed user behavior. v1 leans toward (b) — hard error, refuse to deploy. Forces the user to either pick a different format or use a future "modify" verb. |
+| 4 | **Should the dedup check warn even on different format developer names?** | The user might add `AcmePortalChoices_ACME01_v2` (a renamed variant) when `AcmePortalChoices_ACME01` already exists. Different developer names but functionally a duplicate. | v1: only check exact developer name match. Treating "similar names" as duplicates introduces false positives. The user can rename if they hit a real conflict. |
+
+**Validation priority:** Q1 and Q2 are load-bearing — must be resolved against test-org before any prompt scaffolding. Q3 and Q4 are UX choices that can be settled during build with reviewer input.
+
+---
+
+## Reviewer Sign-off Checklist
+
+Before declaring v1 ready to build:
+
+**Plan completeness:**
+- [ ] Stateful merge architecture is clear (retrieve → parse → merge → deploy → verify)
+- [ ] State-flip table is up-to-date across the full family
+- [ ] V1 scope is "add only" — explicit no on remove, modify, swap, standard connections
+- [ ] Open Question #1 (dry-run probe behavior) flagged for empirical validation before build
+
+**Behavior:**
+- [ ] Pre-flight enforces deactivated agent (matches build/diagnose state requirement)
+- [ ] Skill shows existing formats to the user before deploying anything
+- [ ] Deduplication check warns/blocks on format-name collision
+- [ ] Before/after diff in both markdown and JSON output
+- [ ] Multi-version fallback works (same as diagnose-connection)
+
+**Non-technical UX (matches family bar):**
+- [ ] Plain English in all user-facing text
+- [ ] One question at a time, never dumps all 4 inputs upfront
+- [ ] "What this means" + "How to fix" on every error
+- [ ] Top priority line at the start of the report
+- [ ] Friendly format type names (Text Choices, Image Cards, Time Picker)
+- [ ] Brief status updates during long operations
+- [ ] README.md updated with "Quick Start: Updating a connection" section
+- [ ] GUIDE.md updated with new step explaining update-connection
+
+---
+
+## Changelog
+
+- **v1 (2026-05-13):** Initial draft. 4 inputs, stateful merge architecture, add-only scope for v1, custom-only, deactivated agent required. 4 open questions, 2 load-bearing.
+  Reviewer correctly flagged that the bundle XML gives us the surface *name* but not its current `<responseFormats>` list — the AiSurface itself can't be retrieved by name through the CLI (registry limitation, same one diagnose-connection works around). Step 4 expanded to explain the Method A + Method B approach reused from `diagnose-connection`. New limitation surfaced: the skill regenerates the AiSurface XML from scratch each deploy, so any hand-edited fields on the existing surface XML are lost. Documented in "What It Does NOT Do" so users with hand-edited surfaces aren't surprised.
