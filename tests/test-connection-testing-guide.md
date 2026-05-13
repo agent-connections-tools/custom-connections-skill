@@ -40,7 +40,7 @@ Then it runs pre-flight checks, creates a session, sends the message, renders th
 
 **Test ECA (already configured):**
 - Consumer Key and Consumer Secret are **NOT in this guide**. Get them from the project owner (Abhi) via Slack DM or 1Password. They authenticate to a shared test org — don't paste them into any public channel, public repo file, or Claude Code transcript that could be saved.
-- The ECA has all required scopes (`api`, `refresh_token`, `chatbot_api`, `sfap_api`), Client Credentials Flow enabled, and a Run As user with API Only access.
+- The ECA has all required scopes configured (`api`, `refresh_token, offline_access`, `chatbot_api`, `sfap_api`), Client Credentials Flow enabled, and a Run As user with API Only access. Note: at runtime the JWT only contains 3 of these (`api`, `chatbot_api`, `sfap_api`) — `refresh_token` isn't issued for client_credentials grants.
 - Reviewers should not need to set up a new ECA for these tests — but Scenario 8 specifically tests the ECA-setup walkthrough by simulating "I don't have one."
 
 **Important:** The skill itself does not store or log credentials. They live in shell variables only for the test run and are sanitized to `<redacted>` in the JSON report. Reviewers should verify that — NEVER find the actual Consumer Secret in `/tmp/test-connection-report.json` or any saved log.
@@ -78,7 +78,7 @@ Expected: **9 passed, 0 warnings, 0 issues**
 | 3 | API version ≥ 62.0 | passed | Org is v67.0 |
 | 4 | Agent retrieved | passed | Multi-version fallback: bare name fails, retrieves `BCU_Test_v2` |
 | 5 | Agent active status | passed | v2 is Active, ready to test |
-| 6 | OAuth token obtained + scopes valid | passed | Client credentials grant + JWT scope decode (api, refresh_token, chatbot_api, sfap_api). **Collapsed into one report line** even though the skill prompt has them as two pre-flight steps. |
+| 6 | OAuth token obtained + scopes valid | passed | Client credentials grant + JWT scope decode for the 3 runtime-required scopes (`api`, `chatbot_api`, `sfap_api`). `refresh_token` is configured on the ECA but does NOT appear in the JWT for `client_credentials` grants — don't expect it. **Collapsed into one report line** even though the skill prompt has them as two pre-flight steps. |
 | 7 | Agent API runtime available | passed | `api_instance_url` returned in OAuth response |
 | 8 | Session created | passed | Returns session ID |
 | 9 | Structured response triggered | passed | Format: `BaxterCreditUnionChoices_BCU01` |
@@ -266,7 +266,7 @@ This agent's `MicrosoftTeams` connection has a response format (`TeamsText`) tha
 **Expected result:**
 - Skill walks through the 6-step ECA setup process inline:
   1. Create the app in External Client Apps Manager
-  2. Enable 4 OAuth scopes (api, refresh_token, chatbot_api, sfap_api)
+  2. Enable 4 OAuth scopes on the ECA (api, refresh_token/offline_access, chatbot_api, sfap_api). The skill validates only 3 of these at runtime (refresh_token isn't issued for client_credentials grants).
   3. Enable Client Credentials Flow + JWT-based access tokens for named users
   4. Disable 3 settings (Require Secret for Web Server Flow, Require Secret for Refresh Token Flow, Require PKCE)
   5. Configure the Policy tab (Run As user with API Only access)

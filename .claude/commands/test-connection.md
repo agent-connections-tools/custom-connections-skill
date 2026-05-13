@@ -165,7 +165,7 @@ fi
 - `invalid_client` (secret) → "Your Consumer Secret doesn't match. Click the eye icon on the same page to reveal the correct secret and try again."
 - `no client credentials user enabled` → "Your ECA doesn't have Client Credentials Flow enabled. Go to Setup → External Client Apps → your app → Policies tab → enable 'Enable Client Credentials Flow' and set a Run As user."
 
-**Validate scopes** — decode the JWT and check the scope claim contains `api`, `refresh_token`, `chatbot_api`, `sfap_api`:
+**Validate scopes** — decode the JWT and check the scope claim contains `api`, `chatbot_api`, `sfap_api`. (Don't check `refresh_token` — the `client_credentials` grant doesn't issue refresh tokens, so that scope never appears in the JWT for this flow even when it's configured on the ECA. The ECA setup still recommends configuring `refresh_token` for compatibility with other grant types.)
 
 ```bash
 # JWT is three base64url-encoded parts separated by dots. The middle part is the claims payload.
@@ -341,7 +341,7 @@ PRE-FLIGHT
   ✓ Org '<alias>' connected
   ✓ Agent '<name>' is active (v<N>)
   ✓ OAuth credentials valid (token issued)
-  ✓ All required scopes present (api, refresh_token, chatbot_api, sfap_api)
+  ✓ All required scopes present (api, chatbot_api, sfap_api)
   ✓ Agent API runtime available
 
 TEST SEQUENCE

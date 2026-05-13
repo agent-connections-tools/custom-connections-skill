@@ -72,7 +72,7 @@ Every one of these failure modes was hit during real testing of `build-custom-co
 |---|--------------|--------------------------|-------------------------------|
 | 1 | ECA not configured / wrong Consumer Key | `invalid_client_id` error | "Your Consumer Key isn't recognized in this org. Check Setup → External Client Apps → your app → Settings → OAuth Settings → Consumer Key." |
 | 2 | Client Credentials Flow not enabled | "no client credentials user enabled" | "Your ECA doesn't have Client Credentials Flow enabled. Go to Setup → External Client Apps → your app → Policies tab → enable 'Enable Client Credentials Flow' and set a Run As user." |
-| 3 | Missing OAuth scopes | OAuth succeeds but Agent API returns 401 | Decode the JWT scope claim and verify all 4 required scopes are present (api, refresh_token, chatbot_api, sfap_api). Report which are missing. |
+| 3 | Missing OAuth scopes | OAuth succeeds but Agent API returns 401 | Decode the JWT scope claim and verify the 3 runtime-required scopes are present (`api`, `chatbot_api`, `sfap_api`). Report which are missing. **Note:** `refresh_token` is configured on the ECA but does NOT appear in the JWT for `client_credentials` grants — that grant type doesn't issue refresh tokens. Don't validate it at runtime. |
 | 4 | Run As user lacks permissions | Token works but session creation fails | Tell the user to verify the Run As user has 'API Only access' or appropriate profile. If pre-flight passes but session creation 401s, mention permset/profile as a likely cause. |
 | 5 | Wrong agent ID | 404 on session creation | Query BotDefinition first, validate the agent exists before attempting session. |
 | 6 | Agent is deactivated | Session creation fails or returns errors | Check BotVersion status before attempting. Surface "Your agent needs to be **active** to test it. If you just ran diagnose-connection or deployed changes, you may have deactivated it." |
@@ -128,7 +128,7 @@ Run these before any API calls. Stop early with clear messages if any fail.
 5. **Agent is active** — query BotVersion for Status = 'Active'. If deactivated, stop with: "Your agent needs to be **active** to test it. If you just ran diagnose-connection or deployed changes, you may have deactivated it. Go to **Setup → Agents → select your agent → Activate**."
 6. **Selected connection is on the agent** — verify the chosen surface exists in the bundle's plannerSurfaces
 7. **ECA credentials work for OAuth** — attempt the client_credentials grant. If it fails, surface the specific error (invalid_client_id, no client credentials user enabled, etc.) with the exact Setup → navigation path to fix it
-8. **Required scopes present** — decode the returned JWT, verify `api`, `refresh_token`, `chatbot_api`, and `sfap_api` are all in the `scope` claim. Missing scopes get named in the error.
+8. **Required scopes present** — decode the returned JWT, verify `api`, `chatbot_api`, and `sfap_api` are all in the `scp` claim. Missing scopes get named in the error. **Don't validate `refresh_token` at runtime** — the `client_credentials` grant doesn't issue refresh tokens, so that scope never appears in the JWT even when configured on the ECA. (The ECA setup still recommends configuring it for compatibility with other grant types.)
 9. **Agent API runtime endpoint available** — the OAuth response should include `api_instance_url`. If it returns only `instance_url` (no Agent API runtime), warn: "Your org may not have the Agent API runtime provisioned. This is common on Developer Edition or orgfarm orgs. The test may fail at session creation."
 
 ### Inline Status Display
@@ -196,7 +196,7 @@ PRE-FLIGHT
   ✓ Org 'my-org' connected
   ✓ Agent 'Customer_Support_Agent' is active (v2)
   ✓ OAuth credentials valid (token issued)
-  ✓ All required scopes present (api, refresh_token, chatbot_api, sfap_api)
+  ✓ All required scopes present (api, chatbot_api, sfap_api)
   ✓ Agent API runtime available
 
 TEST SEQUENCE
@@ -549,6 +549,8 @@ Before declaring v3 final, confirm:
 - **v1 (2026-05-13):** Initial draft. 10 failure modes, 4-question input flow, 3-check test sequence, markdown + JSON output. Two open questions on session cleanup and secret handling.
 - **v2 (2026-05-13):** Reviewer pass. Updated Decision #10 from "no schema validation in v1" to "local-first schema fallback, structural validation only." Added Open Question #7: multi-turn vs single-message-per-run. State flip and always-cleanup confirmed.
 - **v3 (2026-05-13 — final):** Three rounds of reviewer feedback consolidated + all 10 open questions empirically validated against test-org. **Non-Technical UX Requirements section added** — same accessibility bar as build-custom-connection and diagnose-connection. Plain English, one question at a time, ECA walkthrough, friendly connection names, visual response rendering, README + GUIDE updates required. Sign-off checklist now includes 11 non-technical UX items.
+- **v3.2 (2026-05-13 — post-test fix):** Live test caught a runtime bug. The JWT `scp` claim for `client_credentials` grants does NOT include `refresh_token` even when configured on the ECA — that scope is only issued for grants that need session renewal. The skill was validating 4 scopes including `refresh_token`, which would have falsely failed every real test run. Fixed: skill now validates only the 3 runtime-issued scopes (`api`, `chatbot_api`, `sfap_api`). ECA setup still recommends configuring `refresh_token` for compatibility with other grant types — the change is purely in what the skill checks at runtime. Updated across plan, skill prompt, testing guide, and README.
+
 - **v3.1 (2026-05-13 — post-review polish):** Reviewer pass on v3 surfaced 5 clarifications. None blocking; all prevent misreads during build:
   - **Failure mode #7** trimmed: skill prompt only references the 4 fields it actually sends. Full 14-field list lives in Validation Results, not the failure mode table.
   - **JSON output `$schema`** clarified: schema version is `v1` (output format), plan version is v3 (planning process). They're independent.

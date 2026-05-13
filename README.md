@@ -330,7 +330,7 @@ The [`examples/`](./examples/) directory includes:
 **For CI/CD:** Run `examples/verify-connection.sh` (one-line bash check) or feed `/tmp/test-connection-report.json` (from the test skill) into your pipeline. Both surface the same underlying API call.
 
 **Prerequisites for any runtime testing:**
-- An External Client App (ECA) with OAuth scopes: `api`, `refresh_token`, `chatbot_api`, `sfap_api`
+- An External Client App (ECA) with OAuth scopes configured: `api`, `refresh_token, offline_access`, `chatbot_api`, `sfap_api` (the runtime token only contains the first, third, and fourth — `refresh_token` isn't issued for client_credentials grants)
 - Client Credentials Flow enabled with a Run As user that has "API Only access" permission
 - See [GUIDE.md](./GUIDE.md#step-8-use-the-custom-connection-via-agent-api) for full ECA setup steps. The test skill walks you through this if you don't have one yet.
 
