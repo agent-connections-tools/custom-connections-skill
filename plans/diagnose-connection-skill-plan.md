@@ -34,7 +34,7 @@ These are real failure modes from testing. Every one produced a confusing or sil
 | 2 | Agent is active during deploy | "Cannot update record as Agent is Active" error | Must deactivate before bundle changes |
 | 3 | Duplicate plannerSurfaces | "Element plannerSurfaces is duplicated" deploy error | Tried adding a second custom surface (only one allowed) |
 | 4 | Wrong bundle version / default version mismatch | Changes applied to v1 but Agent Builder reads v2 | Agent has multiple versions; need to target the version Agent Builder is using |
-| 5 | Broken topic/plugin references | "Plugin not found" error on deploy | Bundle references a topic that was deleted. Also seen with localTopics referencing plugins that don't exist (BCU bundle). |
+| 5 | ~~Broken topic/plugin references~~ | ~~"Plugin not found" error on deploy~~ | ~~Bundle references a topic that was deleted.~~ **Removed from v1** — not connection-related. |
 | 6 | API version mismatch across metadata | Cryptic deploy errors | Bundle deployed at v66.0, response format at v67.0. Platform throws unclear errors. |
 
 **Surface-level failures** (checked by connection-level checks):
@@ -88,9 +88,11 @@ The skill runs these checks in order and reports results as a checklist:
 - [ ] Agent bundle exists and is retrievable
 - [ ] Bundle versions listed (v1, v2, etc.) with which is the default/active version (determined by the `defaultVersion` field in the bundle metadata; if absent, highest-numbered version is assumed active)
 - [ ] Agent activation status (active vs. deactivated)
-- [ ] All localTopicLinks have matching localTopics entries (no orphaned plugin references)
-- [ ] All localTopics reference valid plugins (no "Plugin not found" failures)
 - [ ] API version consistent across bundle and related metadata
+
+**Removed from v1 (not connection-related):**
+- ~~All localTopicLinks have matching localTopics entries (no orphaned plugin references)~~ — topic reference validation is general agent health, not connection diagnosis. May revisit in a future "diagnose-agent" skill.
+- ~~All localTopics reference valid plugins (no "Plugin not found" failures)~~ — same reasoning.
 
 **Connection-level checks (per surface):**
 - [ ] Surface is listed in plannerSurfaces
@@ -244,9 +246,9 @@ The skill prompt instructs Claude to:
 1. Run pre-flight checks (CLI, org auth, API version, permissions)
 2. Run `sf project retrieve start --metadata "GenAiPlannerBundle:<agent>"` to get the bundle
 3. If retrieve fails, help user find the correct name via `sf data query --query "SELECT DeveloperName FROM BotDefinition"`
-4. Parse the XML to extract plannerSurfaces, localTopicLinks, localTopics, version info
+4. Parse the XML to extract plannerSurfaces, version info
 5. List connections found, let user pick which to diagnose (or "all")
-6. Check bundle-level health (versions, activation, topic references, API version consistency)
+6. Check bundle-level health (versions, activation, API version consistency)
 7. For each surface: check surfaceType, adaptiveResponseAllowed, format references, instructions
 8. For each surface with format references: validate format existence via dry-run deploy (batch all formats in one dry-run using real surface metadata from bundle; fall back to individual dry-runs only if batch fails with a format-specific error)
 9. For each response format: JSON.parse the `<input>` field to catch malformed schemas

@@ -109,6 +109,8 @@ Note: Pre-flight environment checks (CLI installed, org connected, API version �
 - Does the report use Setup → navigation paths for fix instructions?
 - Does the terminal summary count match the JSON report counts? (This was a bug in earlier versions — sub-checks were counted separately in the terminal but not in the JSON)
 - Is the JSON schema check reported as skipped/info (not passed)?
+- Are standard connections shown with friendly names (Telephony, Web Chat, Email) — not raw names like SurfaceAction__CustomerWebClient?
+- Is the sfdx-project.json check absent from results? (There's no sfdx-project.json in the CWD, so this check should be omitted entirely)
 - Is the sfdx-project.json check omitted from results (not reported as passed)?
 
 ---
@@ -318,4 +320,5 @@ cd examples/acme-portal && /project:diagnose-connection
 - **Local JSON schema check depends on CWD** — only works if the user runs the skill from a directory containing `.aiResponseFormat` source files.
 - **Multi-version bundle warning is untestable** — all agents in test-org have a single version (v1). The version mismatch warning (plan says: "Agent has N versions — active: vX, most recent: vY") can't be triggered. To test this, you'd need to create an agent with multiple versions in the org. Acknowledged as untested.
 - **Mid-run permission failure is untestable on demand** — the plan says "mark that check as skipped with reason, continue remaining checks." This requires a user profile that passes pre-flight but lacks specific metadata permissions. Can't be reliably triggered in test-org where the user has full admin access. Acknowledged as untested.
+- **sfdx-project.json version check is never exercised** — the custom-connections-skill repo has no `sfdx-project.json` in its root, so pre-flight check 3b always skips. To test the "pinned version too low" warning, you'd need to run the skill from a directory that has a `sfdx-project.json` with `sourceApiVersion` below 62.0.
 - **Temp directory cleanup may be blocked in sandboxed environments** — when testing via agent mode or restricted shells, `rm -rf $WORK_DIR` may be denied by sandbox permissions. This is expected behavior in restricted environments, not a skill bug. In a normal terminal session, cleanup works fine.
