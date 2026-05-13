@@ -1,8 +1,8 @@
-# diagnose-connection — Skill Plan (v4)
+# diagnose-connection — Skill Plan (v5)
 
 **Author:** Abhi Rathna
 **Date:** 2026-05-12
-**Status:** Ready to build (pending final review)
+**Status:** Ready to build (v5 — final)
 
 ---
 
@@ -63,6 +63,8 @@ Before running the full diagnosis, the skill verifies:
 
 If any pre-flight check fails, stop and report the issue. Don't continue to the main checks.
 
+**Mid-run permission failures:** Pre-flight checks verify bundle-level access, but some checks happen later (e.g., dry-run deploy for format validation). If a check hits a permission wall during execution, treat it as a warning ("Could not verify — insufficient permissions"), not a crash. Continue with the remaining checks and note which ones were skipped. The report should still be useful even if some checks couldn't run.
+
 ### Checks Performed
 
 The skill runs these checks in order and reports results as a checklist:
@@ -111,9 +113,9 @@ PASSED (7)
   ✓ 3/3 response formats found
 
 WARNINGS (1)
-  ⚠ Agent has 2 versions (v1, v2) — changes should target v2
-    Context: Agent Builder may read from the latest version, not the one you deployed to.
-    See: GUIDE.md > Agent Versioning
+  ⚠ Agent has 2 versions — active: v2 (per defaultVersion), most recent: v2
+    Context: If you deploy to a different version than the active one, Agent Builder won't reflect your changes.
+    → Fix: Always deploy to the active version, or update defaultVersion after deploying.
 
 FAILED (2)
   ✗ Response format "AcmePortalTimePicker_ACME01" not found in org
@@ -134,6 +136,7 @@ Same content rendered as a styled HTML report. Saved to `/tmp/diagnose-report.ht
 
 ```json
 {
+  "$schema": "diagnose-connection-v1",
   "agent": "Agentforce_Service_Agent",
   "version": "v2",
   "timestamp": "2026-05-12T14:30:00Z",
@@ -195,13 +198,25 @@ To check if a response format exists:
 
 This is the same mechanism `build-custom-connection` uses for deployment. It's the only reliable method until Salesforce adds AiResponseFormat to the CLI registry.
 
+**Latency optimization:** Each dry-run deploy takes ~10-30s. For agents with multiple formats, the skill should batch all format references into a single AiSurface XML and run one dry-run instead of one per format. If the single dry-run fails, fall back to individual dry-runs to identify which specific format is missing. Profile this against test-org before finalizing.
+
+**False positive limitation:** Dry-run deploy is the best available signal, not ground truth. In rare cases (failure mode #1 — "Unchanged" status corruption), a format may pass dry-run validation but still not function at runtime. The skill should note this in the report footer: "This diagnostic catches common configuration errors. If all checks pass but the connection still doesn't work, the issue may be runtime-specific — test with `test-connection` or check Agent Builder directly."
+
 ### Version Detection
 
 The skill determines the active bundle version using:
 1. **Primary:** Read the `defaultVersion` field from the bundle metadata (if present)
 2. **Fallback:** If no `defaultVersion` field, use the highest-numbered version folder in the retrieved bundle
 
-When multiple versions exist, the skill warns the user and tells them which version to target.
+When multiple versions exist, the skill shows **both** the active version and the most recent version:
+
+```
+⚠ Agent has 3 versions — active: v1 (per defaultVersion), most recent: v3
+  Context: You may have deployed to v3 but Agent Builder is still reading v1.
+  → Fix: Update the defaultVersion field to v3, or redeploy your changes to v1.
+```
+
+This prevents confusion when `defaultVersion` points to v1 but the user just deployed changes to v3.
 
 ### Validation Logic
 
@@ -225,6 +240,7 @@ The skill prompt instructs Claude to:
 - **Retrieve fails with permission error:** Report the specific permission needed
 - **Retrieve fails with unknown error:** Show the raw error and suggest checking org connectivity
 - **Dry-run deploy fails with unexpected error:** Report as a warning, not a failure (the format may exist but something else is wrong)
+- **Mid-run permission failure:** If a check hits a permission wall after pre-flight passed, mark that check as "skipped" with reason, continue remaining checks
 
 ### Where It Lives
 
@@ -258,13 +274,16 @@ Skill command is `/project:diagnose-connection` for now. When the `/agentforce:`
 | Task | Hours |
 |------|-------|
 | Skill prompt (`.claude/commands/diagnose-connection.md`) | ~3 |
-| Dry-run deploy validation logic (format existence check) | ~2 |
+| Dry-run deploy validation logic (format existence check) | ~2.5 |
 | HTML + JSON output templates | ~1 |
-| Testing against test-org (all 11 failure modes) | ~1.5 |
+| Testing against test-org (all 11 failure modes) | ~3.5 |
+| Dry-run latency profiling (batch/parallel if needed) | ~1 |
 | Documentation (README update, examples) | ~0.5 |
-| **Total** | **~8** |
+| **Total** | **~12** |
 
-The dry-run deploy validation is the trickiest part — it needs to generate valid temporary metadata, run the deploy, parse the output, and clean up. The rest is straightforward prompt engineering following the `build-custom-connection` pattern.
+**Why 12 and not 8:** The dry-run deploy validation needs generate/deploy/parse/cleanup per format — and testing all 11 failure modes means reproducing each from scratch (deactivate, modify metadata, redeploy, run skill, verify). That's 15-20 min per mode, not 8. Better to underpromise.
+
+**Latency risk:** Each dry-run deploy takes ~10-30s. An agent with 5 formats = 50-150s of waiting. If profiling shows >2 minutes total, batch all formats into a single dry-run deploy (one AiSurface referencing all formats at once) instead of running them individually.
 
 ---
 
@@ -282,6 +301,8 @@ The dry-run deploy validation is the trickiest part — it needs to generate val
 | 8 | **Two-phase retrieve** | Wildcard only for agent listing. Specific bundle retrieve for inspection. Avoids pulling excessive data on orgs with many agents. |
 | 9 | **`defaultVersion` field** for version detection | Falls back to highest-numbered version if field is absent. Explained in output when multiple versions exist. |
 | 10 | **Pre-flight checks** before diagnosis | Catches CLI, auth, API version, and permission issues early with clear error messages instead of cryptic failures mid-run. |
+| 11 | **`$schema` field** in JSON output | Once CI pipelines depend on this JSON, any field rename breaks them. Schema version lets consumers detect changes. Lesson learned from audit-agent. |
+| 12 | **Batch dry-run deploys** when possible | One dry-run with all formats referenced beats N individual dry-runs. Fall back to individual on failure to pinpoint which format is missing. |
 
 ---
 
@@ -302,3 +323,4 @@ None. All blocking questions have been resolved:
 - **v2 (2026-05-12):** First review — added 3 failure modes (#8-10), 3 output formats, resolved Tooling API (dry-run deploy), scoped to single-agent.
 - **v3 (2026-05-12):** Second review — added failure mode #11 (malformed JSON schema), clarified wildcard vs. specific bundle retrieval, documented version detection logic.
 - **v4 (2026-05-12):** Consolidated revision — added pre-flight checks section, error handling section, expanded validation logic to 10-step sequence, restructured decisions as table, added open questions section (all resolved), expanded effort estimate with task breakdown, enriched JSON output example with full check list and fix fields.
+- **v5 (2026-05-12):** Fourth review — bumped effort to 12h (realistic testing estimate), added `$schema` to JSON output, added mid-run permission graceful degradation, version detection now shows both active and most recent versions, added dry-run batching strategy with latency profiling, added false positive caveat in report footer.
