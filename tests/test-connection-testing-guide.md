@@ -78,10 +78,14 @@ Expected: **9 passed, 0 warnings, 0 issues**
 | 3 | API version ≥ 62.0 | passed | Org is v67.0 |
 | 4 | Agent retrieved | passed | Multi-version fallback: bare name fails, retrieves `BCU_Test_v2` |
 | 5 | Agent active status | passed | v2 is Active, ready to test |
-| 6 | OAuth token obtained | passed | Client credentials grant succeeds |
-| 7 | Required scopes present | passed | api + refresh_token + chatbot_api + sfap_api |
+| 6 | OAuth token obtained + scopes valid | passed | Client credentials grant + JWT scope decode (api, refresh_token, chatbot_api, sfap_api). **Collapsed into one report line** even though the skill prompt has them as two pre-flight steps. |
+| 7 | Agent API runtime available | passed | `api_instance_url` returned in OAuth response |
 | 8 | Session created | passed | Returns session ID |
 | 9 | Structured response triggered | passed | Format: `BaxterCreditUnionChoices_BCU01` |
+
+**Counting rule for inventories:** The skill prompt has more pre-flight steps than the report's check count suggests — this is intentional. The skill collapses related pre-flight steps into single report lines (e.g., "OAuth token + scopes valid" is one line in the report, even though the prompt validates them as two operations). The terminal summary counts **report lines**, not internal validation steps. The "Selected connection on agent" check is also implicit in the report — if the user picked a connection from the list the skill showed, by construction it's on the agent.
+
+The terminal summary MUST match the JSON `passed`/`warnings`/`failed` counts exactly. If a reviewer sees "9 passed" in the terminal but a different number in the JSON, that's a bug.
 
 Schema validation:
 - If `BaxterCreditUnionChoices_BCU01.aiResponseFormat` is in CWD → "passed (matched local file)"
@@ -115,16 +119,13 @@ When the user picks the **Telephony** connection:
 
 The "what the agent returned" section should show the agent's text reply (from `messages[*].message`), not a structured format.
 
-### TestEscalation — custom with naming mismatch
+### TestEscalation — moved to known limitations
 
-Expected: **8 passed, 1 warning, 0 issues**
+This agent's `MicrosoftTeams` connection has a response format (`TeamsText`) that doesn't follow the build-custom-connection naming pattern. The skill should warn (not crash) when the format name match fails.
 
-| # | Check | Expected | Notes |
-|---|-------|----------|-------|
-| 1-8 | Pre-flight + OAuth + session | passed | |
-| 9 | Structured response | **warning** | Agent returned plain text — your message didn't trigger a format |
+**However, TestEscalation is currently Inactive in test-org.** Activating it requires admin access and changes shared test state, which most reviewers won't do. The "no structured format triggered" warning path is already exercised by Scenario 3 (5-turn cap with vague messages on BCU_Test), so this case is covered indirectly without needing TestEscalation active.
 
-The warning should suggest a more targeted prompt or checking topic instructions. **Should NOT crash** when format names don't match the build-custom-connection convention.
+**Status:** removed from runnable scenarios. Listed in "Known limitations and untestable scenarios" at the bottom of this guide.
 
 ## Test scenarios
 
@@ -300,59 +301,51 @@ The warning should suggest a more targeted prompt or checking topic instructions
 
 ---
 
-### Scenario 10: Naming mismatch on custom connection
+### Scenario 10: Local schema validation
 
-**Run:** Use `TestEscalation`, choose `MicrosoftTeams` connection, message `"What can I do here?"`
+This scenario has two parts. Part 1 is runnable as-is. Part 2 requires manual setup.
 
-**Context:** TestEscalation has a custom connection named `MicrosoftTeams` (no suffix ID). Its only response format is `TeamsText` — which doesn't follow the build-custom-connection naming pattern.
+**Part 1 — schema skip path (no manual setup):**
 
-**Expected result:**
-- Pre-flight: agent is INACTIVE (v1) → skill stops at Step 4 with state-flip error.
-
-**Wait, this scenario can't run as-is.** TestEscalation needs to be Active to send messages. Either:
-- (a) Reviewer activates TestEscalation in the org first, then runs this scenario
-- (b) Skip Scenario 10 and instead use BCU_Test with a vague message that returns plain text — Scenario 3 already covers the no-format-triggered case
-
-**For the reviewer:** activate TestEscalation if you want to exercise this path. Otherwise mark this scenario as untested.
-
-If activated, expected result:
-- Session creates, message sent, agent responds with plain text
-- Warning: "Connection works (session + message + response received) but the agent returned plain text instead of a structured format."
-- Should NOT crash trying to look up format files for `MicrosoftTeams` (no underscore = no parseable suffix)
-
----
-
-### Scenario 11: Local schema validation
-
-**How to test:** Run the skill from `examples/acme-portal/` (which has 3 local `.aiResponseFormat` files):
+Run the skill from `examples/acme-portal/` (which has 3 Acme `.aiResponseFormat` files but NOT BCU ones):
 ```
 cd examples/acme-portal && /project:test-connection
 ```
 
-**Run:** `BCU_Test`, choose `BaxterCreditUnion_BCU01`, message `"What plans do you offer?"`
+Run against `BCU_Test` → `BaxterCreditUnion_BCU01` with message `"What plans do you offer?"`.
 
 **Expected result:**
 - Skill triggers `BaxterCreditUnionChoices_BCU01`
-- Looks for `BaxterCreditUnionChoices_BCU01.aiResponseFormat` in `examples/acme-portal/unpackaged/aiResponseFormats/`
-- File NOT found (the directory has Acme files, not BCU files)
-- Schema validation **skipped** (NOT failed) — this is the "format not in local files" path
+- Looks for `BaxterCreditUnionChoices_BCU01.aiResponseFormat` in CWD (`examples/acme-portal/unpackaged/aiResponseFormats/`)
+- File NOT found — directory has Acme files, not BCU files. **This is the "format not in local files" path the plan calls out.**
+- Schema validation **skipped** (NOT failed)
 - Report says: "Schema source: none — raw JSON shown"
 
-**Run:** Same, but cd to a directory with `BaxterCreditUnion*.aiResponseFormat` files (if available) or modify a file name to match for testing.
+This validates that a name-mismatch between local files and the triggered format doesn't cause a false failure.
 
-**Expected result:**
+**Part 2 — schema match path (requires manual setup):**
+
+To test the "matching local file found" path, you need a directory with a file named exactly `BaxterCreditUnionChoices_BCU01.aiResponseFormat`. Two options:
+
+**Option A — use the build-custom-connection skill's output:** If you ran `/project:build-custom-connection` for the BaxterCreditUnion client previously, the output should be at `output/unpackaged/aiResponseFormats/BaxterCreditUnionChoices_BCU01.aiResponseFormat`. Run the skill from `output/`.
+
+**Option B — copy from a prior test run:** If a previous run of build-custom-connection put files at `test_skill_output/surface_deploy/aiResponseFormats/`, copy `BaxterCreditUnionChoices_BCU01.aiResponseFormat` to a fresh directory and run the skill from there.
+
+**Option C — quickest:** skip Part 2. The skip-path test in Part 1 already proves the lookup logic. Part 2 mostly validates the structural-validation logic (required fields, types, non-empty arrays) which is easy to inspect statically by reading the skill prompt.
+
+If running Part 2, expected result:
 - Skill finds the matching file by exact name (no startsWith/contains)
 - Validates structurally: `message` is a string, `choices` is a non-empty array
 - Does NOT recurse into array items (that would require a JSON Schema library)
 - Report says: "Schema source: ./BaxterCreditUnionChoices_BCU01.aiResponseFormat"
 
 **Review for:**
-- Is the format name match **exact** (not prefix-based)? Verify by checking that `AcmePortalChoices_AcmePortal01` does NOT match `AcmePortalChoicesWithImages_AcmePortal01`.
-- Is the validation top-level only?
+- Is the format name match **exact** (not prefix-based)? Verify by inspecting the skill prompt at `.claude/commands/test-connection.md` — Step 9 point 3 should say "Match exactly... Don't use `startsWith` or `contains`".
+- Is the validation top-level only? (Step 9 point 4 should say "structural validation, top-level only" and "Do not recurse into array items".)
 
 ---
 
-### Scenario 12: Long-response timeout
+### Scenario 11: Long-response timeout
 
 **Run:** Use any agent with a knowledge-base or RAG-heavy topic. Send a complex query that requires retrieval.
 
@@ -428,11 +421,11 @@ cd examples/acme-portal && /project:test-connection
 
 ## Known limitations and untestable scenarios
 
-- **RAG/knowledge timeouts (Scenario 12)** — test-org doesn't have RAG-configured agents. The 90s timeout and 5s "waiting" indicator are implemented but can't be triggered reliably in test-org.
+- **RAG/knowledge timeouts (Scenario 11)** — test-org doesn't have RAG-configured agents. The 90s timeout and 5s "waiting" indicator are implemented but can't be triggered reliably in test-org.
 - **Mid-run permission failures** — test-org user has full admin access. Can't trigger the "JWT decoded fine but session creation 401s due to profile" scenario.
-- **TestEscalation naming-mismatch test** — agent is currently inactive. Reviewer needs to activate it manually to run Scenario 10.
+- **TestEscalation naming-mismatch test** — TestEscalation is currently Inactive in test-org. Activating it requires admin access and changes shared test state. The "no format triggered" warning path is already covered by Scenario 3 (5-turn cap with vague messages), so this scenario is removed from the runnable list rather than asking reviewers to flip org state. The skill's no-crash-on-format-mismatch behavior can be inspected statically in the skill prompt at `.claude/commands/test-connection.md` Step 9.
 - **ECA setup walkthrough (Scenario 8)** — the test ECA already exists. Reviewers can simulate "I don't have one" by answering no to Q4 and verifying the walkthrough renders correctly, but they don't need to actually create another ECA.
-- **Schema validation against matching local files (Scenario 11 second part)** — depends on whether the reviewer has BCU-prefixed `.aiResponseFormat` files locally. The Acme-portal example files don't match BCU formats. Either generate matching files via build-custom-connection or skip this part of the scenario.
+- **Schema match path (Scenario 10 Part 2)** — depends on whether the reviewer has BCU-prefixed `.aiResponseFormat` files locally. The Acme-portal example files don't match BCU formats. Either follow the manual-setup steps in Scenario 10 Part 2 or skip — Part 1 already validates the lookup logic.
 
 ## Quick spot-check (5 minutes)
 
