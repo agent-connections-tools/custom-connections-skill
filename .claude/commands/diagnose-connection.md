@@ -44,13 +44,14 @@ Check 4 (permissions) gets verified when we try to retrieve the agent in Step 3.
 
 ## Step 3: Pull the agent's configuration
 
-Create a temporary workspace for the retrieve:
+Create a temporary workspace for the retrieve. Use the org's actual API version (from `sf org display` in pre-flight), not a hardcoded value:
 
 ```bash
 WORK_DIR="/tmp/diagnose-$(date +%s)"
 mkdir -p "$WORK_DIR/force-app"
-cat > "$WORK_DIR/sfdx-project.json" << 'EOF'
-{"packageDirectories": [{"path": "force-app", "default": true}], "namespace": "", "sourceApiVersion": "66.0"}
+# Use $ORG_API_VERSION from the pre-flight sf org display output (e.g., "67.0")
+cat > "$WORK_DIR/sfdx-project.json" << EOF
+{"packageDirectories": [{"path": "force-app", "default": true}], "namespace": "", "sourceApiVersion": "$ORG_API_VERSION"}
 EOF
 ```
 
@@ -102,9 +103,11 @@ These checks apply to the whole agent, not individual connections.
 - If multiple versions → warning: tell the user which version is active and which is newest
 
 **Check: API version**
-- Compare the bundle's API version against the org's API version
-- If they match → passed
-- If they differ → warning: "Your agent was built with vX.0 but your org is on vY.0. Consider redeploying."
+- Look for an `<apiVersion>` tag inside the bundle XML (not the temp sfdx-project.json — that's the skill's own scaffolding)
+- If the bundle has an `<apiVersion>` field: compare it against the org's API version from pre-flight
+  - If they match → passed
+  - If they differ → warning: "Your agent was built with vX.0 but your org is on vY.0. Consider redeploying."
+- If the bundle has NO `<apiVersion>` field → **skip this check entirely** (don't report it). Most bundles don't have this field.
 
 ## Step 5: Check each connection
 

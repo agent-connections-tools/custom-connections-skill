@@ -44,38 +44,37 @@ Then it runs checks and shows a report.
 
 ### Agentforce_Service_Agent — "all" connections
 
-Expected: **12 passed, 1 warning, 0 issues** (+ 1 skipped)
+Expected: **11 passed, 1 warning, 0 issues** (+ 1 skipped)
 
 | # | Check | Expected | Notes |
 |---|-------|----------|-------|
 | 1 | Agent retrieved | passed | |
 | 2 | Activation status | **warning** | v1 is Active |
 | 3 | Version | passed | Single version v1 |
-| 4 | API version consistency | passed | v66.0 |
-| 5 | Telephony | passed | Standard, Salesforce-provided |
-| 6 | Web Chat | passed | Standard, Salesforce-provided |
-| 7 | Email | passed | Standard, Salesforce-provided |
-| 8 | Custom connection exists | passed | BaxterCreditUnion_BCU01 in org |
-| 9 | Adaptive responses | passed | Enabled |
-| 10 | Only one custom connection | passed | |
-| 11 | No duplicate connections | passed | |
-| 12 | Response formats found | passed | 2 found by naming convention |
-| 13 | Response formats validated | passed | Dry-run succeeded |
+| 4 | Telephony | passed | Standard, Salesforce-provided |
+| 5 | Web Chat | passed | Standard, Salesforce-provided |
+| 6 | Email | passed | Standard, Salesforce-provided |
+| 7 | Custom connection exists | passed | BaxterCreditUnion_BCU01 in org |
+| 8 | Adaptive responses | passed | Enabled |
+| 9 | Only one custom connection | passed | |
+| 10 | No duplicate connections | passed | |
+| 11 | Response formats found | passed | 2 found by naming convention |
+| 12 | Response formats validated | passed | Dry-run succeeded |
 | — | JSON schema check | **skipped** | No local .aiResponseFormat files (info note, not a pass) |
+| — | API version consistency | **skipped** | Bundle has no `<apiVersion>` tag — check is omitted |
 
 ### Agentforce_Employee_Agent — "all" connections
 
-Expected: **5 passed, 0 warnings, 0 issues**
+Expected: **4 passed, 0 warnings, 0 issues**
 
 | # | Check | Expected | Notes |
 |---|-------|----------|-------|
 | 1 | Agent retrieved | passed | |
 | 2 | Activation status | passed | v1 is Inactive |
 | 3 | Version | passed | Single version v1 |
-| 4 | API version consistency | passed | |
-| 5 | Messaging | passed | Standard, Salesforce-provided |
+| 4 | Messaging | passed | Standard, Salesforce-provided |
 
-No custom connection checks run. No format validation. No JSON schema check.
+No custom connection checks run. No format validation. No JSON schema check. API version check skipped (no `<apiVersion>` tag in bundle).
 
 **About topic/plugin references:** The bundle contains `localTopicLinks` and `localTopics` entries (e.g., ProductRecommendations_BCU01, TEst_16jSB000000U9KP). These are NOT checked by this skill — topic and plugin reference validation was removed because it's not connection-related. If a reviewer asks why these aren't in the report, that's by design.
 
@@ -101,7 +100,7 @@ Note: Pre-flight environment checks (CLI installed, org connected, API version �
 - Custom connection passes all checks (exists, adaptive responses on, 2 formats found and validated)
 - Active agent warning
 - JSON report saved to `/tmp/diagnose-report.json`
-- Total: 12 passed, 1 warning, 0 issues, 1 skipped (see check inventory)
+- Total: 11 passed, 1 warning, 0 issues, 1 skipped (see check inventory)
 - **Critical:** The summary line in the terminal (e.g., "12 passed, 1 warning, 0 issues") must match the JSON report's `passed`/`warnings`/`failed` counts exactly
 
 **Review for:**
@@ -176,7 +175,7 @@ Note: Pre-flight environment checks (CLI installed, org connected, API version �
 - No custom connection checks run — no format validation, no adaptive response check, no duplicate check
 - Report makes sense without custom-specific sections
 - No errors about missing formats
-- Total: 5 passed, 0 warnings, 0 issues (see check inventory)
+- Total: 4 passed, 0 warnings, 0 issues (see check inventory)
 
 **Review for:**
 - Does the skill handle the "no custom connection" case gracefully?
