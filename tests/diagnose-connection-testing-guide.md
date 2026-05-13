@@ -106,7 +106,9 @@ Method B (dry-run) is skipped because Method A found 0 format names — there's 
 
 **About the sfdx-project.json check:** When no `sfdx-project.json` exists in the current working directory, this check is **omitted entirely** — not reported as passed, skipped, or anything else. It simply doesn't appear in the results.
 
-**Counting rule:** The summary line (e.g., "12 passed, 1 warning, 0 issues") counts **top-level checks only** — the same checks listed in the JSON report's `checks` array. Sub-details under a connection (like "deployed ✓, adaptive ✓") are informational, not separate checks. The terminal summary MUST match the JSON `passed`/`warnings`/`failed` counts. If they don't match, that's a bug.
+**Counting rule:** The summary line (e.g., "11 passed, 1 warning, 0 issues") counts **top-level checks only** — the same checks listed in the JSON report's `checks` array. Sub-details under a connection (like "deployed ✓, adaptive ✓") are informational, not separate checks. The terminal summary MUST match the JSON `passed`/`warnings`/`failed` counts. If they don't match, that's a bug.
+
+**Check count flexibility:** The skill may combine related checks into fewer reported lines (e.g., "formats found" and "formats validated" could appear as one line). What matters is that every check described in the inventory above passes — not that the skill outputs the exact number of separate lines. Verify by checking the JSON report's `checks` array: every check in the inventory should have a corresponding entry. If the JSON count is lower, confirm the "missing" checks are folded into another entry, not silently dropped.
 
 Note: Pre-flight environment checks (CLI installed, org connected, API version ≥ 62.0) run before these and stop execution if they fail. They may or may not appear as separate lines in the report. What matters: if they pass, the main checks run.
 
