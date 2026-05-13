@@ -1,8 +1,8 @@
-# diagnose-connection — Skill Plan (v6)
+# diagnose-connection — Skill Plan (v7)
 
 **Author:** Abhi Rathna
 **Date:** 2026-05-12
-**Status:** Ready to build after validating open questions
+**Status:** Ready to build after validating 2 open questions
 
 ---
 
@@ -73,7 +73,7 @@ Before running the full diagnosis, the skill verifies:
 
 1. **Salesforce CLI is installed** — `sf --version` must succeed
 2. **Org is authenticated** — `sf org display --target-org $ORG_ALIAS` must succeed
-3. **Org API version supports Agent metadata** — check that the org's API version is >= 62.0 (when GenAiPlannerBundle, AiSurface, and AiResponseFormat were introduced). Detected via `sf org display` output. If too old, stop early with a clear message: "Your org's API version (vXX.0) doesn't support Agent metadata. Minimum required: v62.0."
+3. **Org API version supports Agent metadata** — check that the org's API version is >= 62.0 (when GenAiPlannerBundle, AiSurface, and AiResponseFormat were introduced). Detected via `sf org display` output. If too old, stop early with a clear message: "Your org's API version (vXX.0) doesn't support Agent metadata. Minimum required: v62.0." Also check for a local `sfdx-project.json` with a pinned `sourceApiVersion` — if pinned below 62.0, warn: "Org supports v62.0+ but your project pins vXX.0 in sfdx-project.json — this may cause retrieve failures."
 4. **User has permission to retrieve metadata** — the initial `sf project retrieve start` will fail if the user's profile doesn't have metadata access. Catch this error specifically and report: "Could not retrieve agent metadata. Check that your user profile has the 'Modify Metadata Through Metadata API Functions' permission."
 
 If any pre-flight check fails, stop and report the issue. Don't continue to the main checks.
@@ -213,7 +213,7 @@ Using the real surface metadata (not a generated stub) avoids false signals from
 
 **Open question (must validate before building):** What happens when you dry-run deploy a surface that already exists in the org? If it succeeds (treated as a no-op update), this approach works cleanly. If it fails (duplicate error), we need to generate a temporary surface with a unique name that references the same formats. See "Open Questions" section.
 
-**Latency optimization:** Each dry-run deploy takes ~10-30s. For agents with multiple surfaces, batch all surfaces into a single dry-run. If it fails, fall back to individual dry-runs per surface to pinpoint which format is missing. Profile against test-org before finalizing.
+**Latency optimization:** Always batch first. Put all format references into a single dry-run deploy — the single-format case is just a batch of one. If the batch succeeds, all formats exist (one round-trip). If it fails, fall back to individual dry-runs per format to pinpoint which one is missing. No conditional path, no threshold — batch is the default.
 
 **False positive limitation:** Dry-run deploy is the best available signal, not ground truth. In rare cases (failure mode #7 — "Unchanged" status corruption), a format may pass dry-run validation but still not function at runtime. The skill notes this in the report footer: "This diagnostic catches common configuration errors. If all checks pass but the connection still doesn't work, the issue may be runtime-specific — test with `test-connection` or check Agent Builder directly."
 
@@ -298,7 +298,7 @@ Skill command is `/project:diagnose-connection` for now. When the `/agentforce:`
 
 **Why 10.5:** The dry-run validation logic is part of the skill prompt — it's all instructions to Claude, not a separate script. Merged into one 5-hour block. Dropped HTML (deferred to v2), saving ~1 hour. Testing all 11 failure modes means reproducing each from scratch (deactivate, modify metadata, redeploy, run skill, verify) — that's 15-20 min per mode.
 
-**Latency risk:** Each dry-run deploy takes ~10-30s. An agent with 5 formats across one surface = one batched dry-run. Multiple surfaces = one dry-run per surface. If profiling shows >2 minutes total, investigate parallelizing.
+**Latency risk:** Each dry-run deploy takes ~10-30s. Batching all formats into one dry-run means one round-trip regardless of format count. Individual fallback dry-runs only run if the batch fails.
 
 ---
 
@@ -317,7 +317,7 @@ Skill command is `/project:diagnose-connection` for now. When the `/agentforce:`
 | 9 | **`defaultVersion` field** for version detection | Falls back to highest-numbered version if field is absent. Explained in output when multiple versions exist. |
 | 10 | **Pre-flight checks** before diagnosis | Catches CLI, auth, API version, and permission issues early with clear error messages instead of cryptic failures mid-run. |
 | 11 | **`$schema` field** in JSON output | Once CI pipelines depend on this JSON, any field rename breaks them. Schema version lets consumers detect changes. Lesson learned from audit-agent. |
-| 12 | **Batch dry-run deploys** when possible | One dry-run with all formats referenced beats N individual dry-runs. Fall back to individual on failure to pinpoint which format is missing. |
+| 12 | **Batch dry-run deploys by default** | Always batch first — single-format is just a batch of one. Simpler logic, no conditional path. Individual dry-runs only run after a batch failure to pinpoint which format broke. |
 | 13 | **Use real surface metadata** for dry-run | Deploy the actual AiSurface from the bundle in dry-run mode, not a generated stub. Validates exactly what's deployed, avoids false signals from malformed generated XML. |
 
 ---
@@ -347,3 +347,4 @@ Two questions must be validated against test-org before building:
 - **v4 (2026-05-12):** Consolidated revision — added pre-flight checks section, error handling section, expanded validation logic to 10-step sequence, restructured decisions as table, added open questions section (all resolved), expanded effort estimate with task breakdown, enriched JSON output example with full check list and fix fields.
 - **v5 (2026-05-12):** Fourth review — bumped effort to 12h (realistic testing estimate), added `$schema` to JSON output, added mid-run permission graceful degradation, version detection now shows both active and most recent versions, added dry-run batching strategy with latency profiling, added false positive caveat in report footer.
 - **v6 (2026-05-12):** Fifth review — dropped wildcard listing (user provides agent name directly, same as build-custom-connection), cut HTML output from v1, grouped failure modes by level (bundle/surface/environment), merged effort estimate line items (10.5h), use real surface metadata for dry-run instead of generated stub, added 2 open questions to validate before building.
+- **v7 (2026-05-12):** Sixth review — pre-flight now checks `sfdx-project.json` pinned API version, batch dry-runs are the default path (not conditional).
