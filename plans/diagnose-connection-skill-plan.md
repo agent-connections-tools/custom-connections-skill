@@ -2,7 +2,7 @@
 
 **Author:** Abhi Rathna
 **Date:** 2026-05-12
-**Status:** Ready to build (pending final approval)
+**Status:** Ready to build (v3 — pending final approval)
 
 ---
 
@@ -38,6 +38,7 @@ These are real failure modes from testing. Every one produced a confusing or sil
 | 8 | API version mismatch across metadata | Cryptic deploy errors | Bundle deployed at v66.0, response format at v67.0. Platform throws unclear errors. |
 | 9 | Permission errors on retrieve | Skill fails silently or throws cryptic sf CLI error | User's profile can't access GenAiPlannerBundle metadata. Need pre-flight check or clear error message. |
 | 10 | Org API version too old | Queries 404, metadata types not recognized | Org's metadata API version is older than when AiSurface/AiResponseFormat were introduced. |
+| 11 | Malformed JSON schema in response format | Format deploys fine but agent silently ignores it | The JSON inside the `<input>` tag has a syntax error (missing quote, trailing comma). Cheap to catch with JSON.parse. |
 
 **Removed from v1:** ECA/OAuth setup check — requires Connected App metadata which is a different retrieval path. Will revisit in v2.
 
@@ -57,7 +58,7 @@ The skill runs these checks in order and reports results as a checklist:
 
 **Bundle-level checks:**
 - [ ] Agent bundle exists and is retrievable
-- [ ] Bundle versions listed (v1, v2, etc.) with which is the default/active version
+- [ ] Bundle versions listed (v1, v2, etc.) with which is the default/active version (determined by the `defaultVersion` field in the bundle metadata; if absent, highest-numbered version is assumed active)
 - [ ] Agent activation status (active vs. deactivated)
 - [ ] All localTopicLinks have matching localTopics entries (no orphaned plugin references)
 - [ ] All localTopics reference valid plugins (no "Plugin not found" failures)
@@ -69,7 +70,7 @@ The skill runs these checks in order and reports results as a checklist:
 - [ ] adaptiveResponseAllowed is set correctly
 - [ ] Surface developer name in bundle matches the deployed AiSurface name exactly
 - [ ] All response formats referenced by the surface exist in the org (via dry-run deploy validation)
-- [ ] Response format JSON schemas are valid
+- [ ] Response format JSON schemas are valid (JSON.parse the `<input>` field — catches missing quotes, trailing commas)
 - [ ] Surface instructions are present and non-empty
 
 **Custom connection extras:**
@@ -143,9 +144,14 @@ Saved to `/tmp/diagnose-report.json`. Enables `if any checks fail, fail the pipe
 ### Metadata Retrieval
 
 ```bash
-# Retrieve all agent bundles (to list available agents and find versions)
+# Step 1: Retrieve all bundles (lightweight — just folder names, used to list available agents)
 sf project retrieve start --metadata "GenAiPlannerBundle:*" --target-org $ORG_ALIAS --output-dir /tmp/diagnose/
+
+# Step 2: Once the user picks an agent, retrieve just that bundle for detailed inspection
+sf project retrieve start --metadata "GenAiPlannerBundle:Agentforce_Service_Agent" --target-org $ORG_ALIAS --output-dir /tmp/diagnose/
 ```
+
+**Note:** Wildcard retrieve (`*`) is only used for the initial agent listing. Detailed inspection always targets the specific bundle to avoid pulling excessive data on orgs with many agents.
 
 ### Key Constraint: AiResponseFormat and AiSurface can't be queried or retrieved by name
 
@@ -215,19 +221,21 @@ Skill command is `/project:diagnose-connection` for now. When the `/agentforce:`
 - Testing against test-org: ~1 hour
 - Documentation (README update, examples): ~30 minutes
 
-**Total: ~7.5 hours**
+**Total: ~8 hours**
 
 ---
 
 ## Decisions Made
 
-1. **Check list** — 8 failure modes (added: localized topic/plugin mismatches, default version mismatch, surface name typos, API version mismatch). Removed ECA check from v1.
+1. **Check list** — 11 failure modes. Removed ECA check from v1. Added: localized topic/plugin mismatches, default version mismatch, surface name typos, API version mismatch, permission errors on retrieve, org API version too old, malformed JSON schema in response format.
 2. **Read-only for v1** — confirmed. No auto-fix.
 3. **Same repo** — confirmed. `custom-connections-skill`.
 4. **Tooling API** — investigated and resolved. Not available. Using dry-run deploy validation instead.
 5. **Output formats** — markdown (terminal), HTML (sharing), JSON (CI/CD).
 6. **Scope** — single-agent for v1. Multi-agent audit in v2.
 7. **Namespace** — `/project:diagnose-connection` for now. Migrates to `/agentforce:` with the skill family.
+8. **Wildcard retrieve** — only used for initial agent listing. Detailed inspection targets the specific bundle to avoid pulling excessive data.
+9. **Version detection** — uses `defaultVersion` field from bundle metadata; falls back to highest-numbered version if absent.
 
 ---
 
@@ -235,3 +243,4 @@ Skill command is `/project:diagnose-connection` for now. When the `/agentforce:`
 
 - **v1 (2026-05-12):** Initial draft.
 - **v2 (2026-05-12):** Incorporated review feedback — added 4 failure modes, 3 output formats, resolved Tooling API question (not available, using dry-run deploy), scoped to single-agent, updated effort estimate.
+- **v3 (2026-05-12):** Third round of feedback — added failure mode #11 (malformed JSON schema), clarified wildcard vs. specific bundle retrieval, documented version detection logic (`defaultVersion` field), updated decisions list.
