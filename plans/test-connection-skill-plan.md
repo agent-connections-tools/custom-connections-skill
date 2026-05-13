@@ -27,6 +27,43 @@ This is the third skill in the build / diagnose / test trio:
 
 ---
 
+## Non-Technical UX Requirements
+
+This skill must be usable by Salesforce Admins who have **never** written a curl command, read an OAuth JWT, or interacted with the Agent API directly. The same accessibility bar as `build-custom-connection` and `diagnose-connection`. Specifically:
+
+**Language:**
+- **Plain English everywhere.** No metadata jargon. Don't say "plannerSurfaces", "surfaceConfig.surfaceType", "JWT scope claim", "result[] array", "GenAiPlannerBundle", or "AiResponseFormat" in user-facing messages. Translate to: "your connection", "the connection type", "your access permissions", "the agent's response", "your agent's configuration", "your response format files."
+- **Setup → navigation paths**, not URLs or API endpoints. "Setup → External Client Apps Manager → your app → OAuth Settings" instead of "the ConnectedApp metadata."
+- **Action verbs in fix instructions.** "Click Activate" not "set the Status field to Active." "Copy the Consumer Key" not "extract the OAuth client_id."
+
+**Conversation flow:**
+- **One question at a time.** Never dump 5 inputs at once. Wait for each answer before asking the next. Same pattern as `build-custom-connection` and `diagnose-connection`.
+- **Run commands without asking permission.** Don't say "shall I run sf org display?" — just run it and show the result.
+- **Help the user find inputs they don't know.** When asking for the agent name, offer two ways to find it (Setup → Agents OR `sf data query`). When asking for ECA credentials, point to the exact Setup screen.
+- **Walk through ECA setup if they don't have one.** Don't fail with "ECA not configured" — guide them through the 6 steps in the Setup UI.
+
+**Error messages:**
+- Every error has **What this means** (1-sentence plain-English explanation) and **How to fix** (concrete step with Setup → navigation path or exact command).
+- Never show raw API errors or stack traces. Translate them. Example: instead of `"invalid_client_id"`, show "Your Consumer Key isn't recognized in this org. Check Setup → External Client Apps → your app → Settings → OAuth Settings → Consumer Key."
+- When something fails, the user should know **why** and **what to do next** without leaving the terminal.
+
+**Report:**
+- **Top priority line.** First line of the report tells the user the single most important thing — passed end-to-end, or the highest-priority fix. Same pattern as diagnose-connection.
+- **Connections shown by friendly name** (Telephony, Web Chat, Email) where possible — not raw `SurfaceAction__CustomerWebClient` names.
+- **Render structured responses visually** (numbered choices, image cards, time picker) — not raw JSON. The JSON is in the file for CI/CD; the terminal shows what the user actually wants to see.
+- **No metadata schema language in the report.** Show "found 4 choices" not "the result[] entry has 4 elements in the choices array." Show "The agent picked the AcmePortalChoices format" not "type: SURFACE_ACTION__AcmePortalChoices_ACME01."
+
+**Transparency:**
+- Show what the skill is doing without making the user read it. Brief status updates: "Logging in...", "Starting session...", "Sending your message...", "Waiting for response..." (the 5s waiting indicator).
+- If a check is skipped (no local files, no `<apiVersion>` tag, etc.), say so plainly with a one-line reason. Don't silently omit.
+
+**README and GUIDE updates:**
+- The skill must be added to `README.md` and `GUIDE.md` with the same treatment as `build-custom-connection` and `diagnose-connection`:
+  - **README:** A "Quick Start: Testing your connection" section with the questions the skill asks, a sample report, and what the skill does.
+  - **GUIDE:** A new step (likely Step 11) "Testing your connection end-to-end" that explains the test sequence in plain language, what the report sections mean, and what the skill can't catch (e.g., visual rendering issues — that's the user's app).
+
+---
+
 ## The Problems It Solves
 
 Every one of these failure modes was hit during real testing of `build-custom-connection`. The `examples/verify-connection.sh` script handles the basic OAuth + session flow, but it doesn't surface the *why* when something fails:
@@ -464,9 +501,12 @@ The script stays useful for CI/CD smoke tests. The skill is for interactive test
 
 Before declaring v3 final, confirm:
 
+**Plan completeness:**
 - [ ] All three reviewer rounds incorporated (R1, R2, R3 — see Changelog v3 entry)
 - [ ] All 10 open questions empirically resolved against test-org
 - [ ] Decision #15 (all standard types supported) confirmed by Q1 + Q10 validation — no contradiction with open questions
+
+**Behavior:**
 - [ ] State-flip prominence: pre-flight #5 + inline status (#16) + failure mode #6 + Relationship section
 - [ ] Schema validation handles format mismatch case (don't fail when agent picks a format not in local files)
 - [ ] Multi-turn is opt-in, capped at 5 turns, single-response report semantics
@@ -475,13 +515,25 @@ Before declaring v3 final, confirm:
 - [ ] `result[].value` JSON.parse step documented in rendering logic
 - [ ] No `externalClientId` in any sample request
 
+**Non-technical UX (matches build/diagnose bar):**
+- [ ] Plain English in all user-facing text — no metadata jargon (plannerSurfaces, surfaceConfig, JWT, GenAiPlannerBundle, etc.)
+- [ ] One question at a time, never dump all 5 inputs upfront
+- [ ] Every error has "What this means" + "How to fix" with Setup → navigation paths or exact commands
+- [ ] ECA setup walkthrough included for users who don't have one
+- [ ] Top priority line at the start of the report
+- [ ] Standard connections shown with friendly names (Telephony, Web Chat, Email) — not raw SurfaceAction__ names
+- [ ] Structured responses rendered visually (numbered choices, image cards, time picker) — not raw JSON
+- [ ] Brief status updates during long operations ("Starting session...", "Waiting for response...")
+- [ ] README.md updated with "Quick Start: Testing your connection" section
+- [ ] GUIDE.md updated with a new step (likely Step 11) explaining test-connection in plain language
+
 ---
 
 ## Changelog
 
 - **v1 (2026-05-13):** Initial draft. 10 failure modes, 4-question input flow, 3-check test sequence, markdown + JSON output. Two open questions on session cleanup and secret handling.
 - **v2 (2026-05-13):** Reviewer pass. Updated Decision #10 from "no schema validation in v1" to "local-first schema fallback, structural validation only." Added Open Question #7: multi-turn vs single-message-per-run. State flip and always-cleanup confirmed.
-- **v3 (2026-05-13 — final):** Three rounds of reviewer feedback consolidated + all 10 open questions empirically validated against test-org.
+- **v3 (2026-05-13 — final):** Three rounds of reviewer feedback consolidated + all 10 open questions empirically validated against test-org. **Non-Technical UX Requirements section added** — same accessibility bar as build-custom-connection and diagnose-connection. Plain English, one question at a time, ECA walkthrough, friendly connection names, visual response rendering, README + GUIDE updates required. Sign-off checklist now includes 11 non-technical UX items.
   - **Multi-turn (Q7) resolved:** opt-in, 5-turn cap, single-response report semantics. ~1h impl (Decision #3 updated).
   - **Schema validation (Decision #10) refined:** match by triggered format name, skip validation if format not in local files (don't fail), report which file was used as schema source.
   - **surfaceType mapping eliminated:** Q1 + Q10 validation showed the API accepts all surface type values. Pass-through, no mapping. Decision #15 holds.
