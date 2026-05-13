@@ -1,4 +1,4 @@
-# diagnose-connection — Skill Plan (v7)
+# diagnose-connection — Skill Plan (v8)
 
 **Author:** Abhi Rathna
 **Date:** 2026-05-12
@@ -73,7 +73,7 @@ Before running the full diagnosis, the skill verifies:
 
 1. **Salesforce CLI is installed** — `sf --version` must succeed
 2. **Org is authenticated** — `sf org display --target-org $ORG_ALIAS` must succeed
-3. **Org API version supports Agent metadata** — check that the org's API version is >= 62.0 (when GenAiPlannerBundle, AiSurface, and AiResponseFormat were introduced). Detected via `sf org display` output. If too old, stop early with a clear message: "Your org's API version (vXX.0) doesn't support Agent metadata. Minimum required: v62.0." Also check for a local `sfdx-project.json` with a pinned `sourceApiVersion` — if pinned below 62.0, warn: "Org supports v62.0+ but your project pins vXX.0 in sfdx-project.json — this may cause retrieve failures."
+3. **Org API version supports Agent metadata** — check that the org's API version is >= 62.0 (when GenAiPlannerBundle, AiSurface, and AiResponseFormat were introduced). Detected via `sf org display` output. If too old, stop early with a clear message: "Your org's API version (vXX.0) doesn't support Agent metadata. Minimum required: v62.0." Also check for a `sfdx-project.json` in the user's current working directory (not the skill's own directory) with a pinned `sourceApiVersion` — if pinned below 62.0, warn: "Org supports v62.0+ but your project pins vXX.0 in sfdx-project.json — this may cause retrieve failures."
 4. **User has permission to retrieve metadata** — the initial `sf project retrieve start` will fail if the user's profile doesn't have metadata access. Catch this error specifically and report: "Could not retrieve agent metadata. Check that your user profile has the 'Modify Metadata Through Metadata API Functions' permission."
 
 If any pre-flight check fails, stop and report the issue. Don't continue to the main checks.
@@ -291,12 +291,12 @@ Skill command is `/project:diagnose-connection` for now. When the `/agentforce:`
 |------|-------|
 | Skill prompt including dry-run validation logic (`.claude/commands/diagnose-connection.md`) | ~5 |
 | JSON output template | ~0.5 |
-| Testing against test-org (all 11 failure modes) | ~3.5 |
+| Testing against test-org (all 11 failure modes) | ~4.5 |
 | Dry-run latency profiling (batch if needed) | ~1 |
 | Documentation (README update, examples) | ~0.5 |
-| **Total** | **~10.5** |
+| **Total** | **~12** |
 
-**Why 10.5:** The dry-run validation logic is part of the skill prompt — it's all instructions to Claude, not a separate script. Merged into one 5-hour block. Dropped HTML (deferred to v2), saving ~1 hour. Testing all 11 failure modes means reproducing each from scratch (deactivate, modify metadata, redeploy, run skill, verify) — that's 15-20 min per mode.
+**Why 12:** The dry-run validation logic is part of the skill prompt — it's all instructions to Claude, not a separate script. Merged into one 5-hour block. Dropped HTML (deferred to v2). Testing all 11 failure modes means reproducing each from scratch — simple ones are 15-20 min, but multi-step modes (e.g., #4 wrong bundle version requires deploying a bundle with multiple versions then targeting the wrong one) are closer to 30 min each.
 
 **Latency risk:** Each dry-run deploy takes ~10-30s. Batching all formats into one dry-run means one round-trip regardless of format count. Individual fallback dry-runs only run if the batch fails.
 
@@ -317,7 +317,7 @@ Skill command is `/project:diagnose-connection` for now. When the `/agentforce:`
 | 9 | **`defaultVersion` field** for version detection | Falls back to highest-numbered version if field is absent. Explained in output when multiple versions exist. |
 | 10 | **Pre-flight checks** before diagnosis | Catches CLI, auth, API version, and permission issues early with clear error messages instead of cryptic failures mid-run. |
 | 11 | **`$schema` field** in JSON output | Once CI pipelines depend on this JSON, any field rename breaks them. Schema version lets consumers detect changes. Lesson learned from audit-agent. |
-| 12 | **Batch dry-run deploys by default** | Always batch first — single-format is just a batch of one. Simpler logic, no conditional path. Individual dry-runs only run after a batch failure to pinpoint which format broke. |
+| 12 | **Batch dry-run deploys by default** | Always batch first — single-format is just a batch of one. Simpler logic, no conditional path. On batch failure: if the error mentions a specific format name, fall back to individual dry-runs to pinpoint which broke. If the error doesn't mention a format (e.g., surface-level issue), report it as a surface-level problem — don't fall through to individual format checks that would all fail for the same reason. |
 | 13 | **Use real surface metadata** for dry-run | Deploy the actual AiSurface from the bundle in dry-run mode, not a generated stub. Validates exactly what's deployed, avoids false signals from malformed generated XML. |
 
 ---
@@ -329,7 +329,7 @@ Two questions must be validated against test-org before building:
 | # | Question | Why It Matters | Fallback If It Fails |
 |---|----------|---------------|---------------------|
 | 1 | **Does dry-run deploy of an existing AiSurface succeed or fail?** | The format validation strategy uses the real surface XML from the bundle. If dry-run treats it as a duplicate and errors, we need to generate a temporary surface with a unique name that references the same formats instead. | Generate temp surface: `DiagnoseCheck_<timestamp>.aiSurface` referencing the same formats, dry-run deploy it, then discard. |
-| 2 | **Is `GenAiPlannerBundle:*` retrieve payload acceptable?** | We dropped the wildcard from the skill flow, but if the skill can't find the bundle by the name the user provides, the fallback help message suggests `BotDefinition` SOQL. Worth confirming this query works and returns the right developer names. | If BotDefinition query doesn't return bundle-compatible names, document the exact mapping (BotDefinition.DeveloperName → GenAiPlannerBundle name). |
+| 2 | **Does `BotDefinition.DeveloperName` match the `GenAiPlannerBundle` name exactly?** | The skill's fallback help message tells users to run `SELECT DeveloperName FROM BotDefinition` to find their agent name. That name must work as the argument to `GenAiPlannerBundle:<name>` retrieve. If there's a mapping or transformation, the skill needs to handle it. | If names don't match, document the exact mapping (BotDefinition.DeveloperName → GenAiPlannerBundle name) and add a transformation step in the skill. |
 
 **Previously resolved:**
 - Tooling API availability → not available, using dry-run deploy
@@ -348,3 +348,4 @@ Two questions must be validated against test-org before building:
 - **v5 (2026-05-12):** Fourth review — bumped effort to 12h (realistic testing estimate), added `$schema` to JSON output, added mid-run permission graceful degradation, version detection now shows both active and most recent versions, added dry-run batching strategy with latency profiling, added false positive caveat in report footer.
 - **v6 (2026-05-12):** Fifth review — dropped wildcard listing (user provides agent name directly, same as build-custom-connection), cut HTML output from v1, grouped failure modes by level (bundle/surface/environment), merged effort estimate line items (10.5h), use real surface metadata for dry-run instead of generated stub, added 2 open questions to validate before building.
 - **v7 (2026-05-12):** Sixth review — pre-flight now checks `sfdx-project.json` pinned API version, batch dry-runs are the default path (not conditional).
+- **v8 (2026-05-12):** Seventh review — pre-flight checks CWD sfdx-project.json not skill directory, testing estimate bumped to 4.5h (total 12h), fixed open question #2 phrasing to match actual question, added batch dry-run error heuristic (format-name vs surface-level errors).
