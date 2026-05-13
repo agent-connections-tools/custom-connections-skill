@@ -76,6 +76,30 @@ Expected: **4 passed, 0 warnings, 0 issues**
 
 No custom connection checks run. No format validation. No JSON schema check. API version check skipped (no `<apiVersion>` tag in bundle).
 
+### TestEscalation — "all" connections
+
+Expected: **12 passed, 1 warning, 0 issues** (+ 1 skipped)
+
+| # | Check | Expected | Notes |
+|---|-------|----------|-------|
+| 1 | Agent retrieved | passed | |
+| 2 | Activation status | passed | v1 is Inactive |
+| 3 | Version | passed | Single version v1 |
+| 4 | Messaging | passed | Standard, Salesforce-provided |
+| 5 | Web Chat | passed | Standard, Salesforce-provided |
+| 6 | Telephony | passed | Standard, Salesforce-provided |
+| 7 | Email | passed | Standard, Salesforce-provided |
+| 8 | Test | passed | Unknown surfaceType — treated like standard |
+| 9 | Custom connection exists | passed | MicrosoftTeams is in AiSurface list |
+| 10 | Adaptive responses | passed | Enabled |
+| 11 | Only one custom connection | passed | |
+| 12 | No duplicate connections | passed | |
+| 13 | Response formats found | **warning** | 0 found by naming convention (TeamsText doesn't match pattern) |
+| — | JSON schema check | **skipped** | No local files |
+| — | API version consistency | **skipped** | No `<apiVersion>` tag in bundle |
+
+Method B (dry-run) is skipped because Method A found 0 format names — there's nothing to validate. The real AiSurface in the org may reference TeamsText, but the skill can't retrieve AiSurface XML (CLI blocks it), so it can only work with what Method A finds.
+
 **About topic/plugin references:** The bundle contains `localTopicLinks` and `localTopics` entries (e.g., ProductRecommendations_BCU01, TEst_16jSB000000U9KP). These are NOT checked by this skill — topic and plugin reference validation was removed because it's not connection-related. If a reviewer asks why these aren't in the report, that's by design.
 
 **About the JSON schema check:** When no local `.aiResponseFormat` files exist in the current directory, this check is **skipped** with an info note. It does NOT count as a "passed" check. The info note should appear outside the pass/warning/issue counts.
@@ -204,23 +228,26 @@ Note: Pre-flight environment checks (CLI installed, org connected, API version �
 
 ### Scenario 7: Response format validation — naming mismatch (no matching formats)
 
-**Run:** `/project:diagnose-connection` with org `test-org`, agent `TestEscalation`, choose the custom connection `MicrosoftTeams`
+**Run:** `/project:diagnose-connection` with org `test-org`, agent `TestEscalation`, choose **"all"**
 
-**Context:** `TestEscalation` has a custom connection named `MicrosoftTeams` (no suffix ID). The only response format in the org for it is `TeamsText`, which doesn't follow the `build-custom-connection` naming pattern (`<ClientName><Type>_<SurfaceId>`). So Method A (naming convention match) should find 0 matching formats.
+Use "all" (not just the custom connection) so this scenario also exercises the unknown `Test` surfaceType.
+
+**Context:** `TestEscalation` has 6 connections including a custom connection named `MicrosoftTeams` (no suffix ID). The only response format in the org for it is `TeamsText`, which doesn't follow the `build-custom-connection` naming pattern (`<ClientName><Type>_<SurfaceId>`). So Method A (naming convention match) should find 0 matching formats.
 
 **Expected result:**
-- Method A finds 0 formats matching the naming convention
-- Warning: "I couldn't find any response formats for this connection."
-- **Method B (dry-run) is skipped** — there are no format names to validate. The skill does not try to infer format names from the deployed AiSurface (it can't retrieve AiSurface XML). Method B only runs when Method A finds formats to verify.
-- The skill does NOT crash — it handles the "no formats found" case gracefully
-
-**Also verify:** `TestEscalation` has a connection with surfaceType `Test` (surface name `SurfaceAction__Test`). This is a non-standard surfaceType. The skill should treat it like any other standard connection — report it as passed with its type name, not crash or report an error.
+- 5 standard connections pass (Messaging, Web Chat, Telephony, Email, Test)
+- The `Test` surfaceType is treated like a standard connection — no crash, no error
+- Custom connection (MicrosoftTeams): exists in org, adaptive responses enabled, one custom, no duplicates — all pass
+- Method A finds 0 formats matching the naming convention → warning
+- **Method B (dry-run) is skipped** — there are no format names to validate. The skill can't retrieve AiSurface XML, so it only works with what Method A found.
+- Total: 12 passed, 1 warning, 0 issues, 1 skipped (see check inventory)
 
 **Review for:**
 - Does the naming convention search fail gracefully when the surface name has no suffix ID?
 - Is the warning message clear about why no formats were found?
 - Does the skill suggest what to do? (e.g., "If you built it with the `build-custom-connection` skill, they should be there. You may need to redeploy them.")
 - Does the skill handle the `Test` surfaceType without crashing?
+- Does the total match the check inventory for TestEscalation?
 
 ---
 
