@@ -472,6 +472,23 @@ Same repo. Trio becomes a quartet.
 
 **Validation priority:** Q1 and Q2 are load-bearing — must be resolved against test-org before any prompt scaffolding. Q3 resolved post-review (warn + confirm). Q4 is a UX choice that can be settled during build.
 
+### Validation results (2026-05-13, against test-org)
+
+**Q1 — Method A reliability:**
+
+- **Test (a) — BCU01 conventional naming:** `sf org list metadata --metadata-type AiResponseFormat` returns `BaxterCreditUnionChoices_BCU01` and `BaxterCreditUnionChoicesWithImages_BCU01` cleanly. Method A's pattern `BaxterCreditUnion*_BCU01` matches both. ✅ **Method A works on conventional naming.**
+- **Test (b) — TestEscalation MicrosoftTeams non-conventional naming:** The surface name is `MicrosoftTeams` (no `_<SurfaceId>` suffix). The org has a format named `TeamsText` (no `MicrosoftTeams` prefix, no `_<SurfaceId>` suffix). Method A's filter cannot match either prefix or suffix. **Method A finds zero formats.** Per plan Step 4a special case ("Method A finds zero formats but the bundle wires the surface"), the skill **hard-stops** before any deploy. ✅ **Safety rail fires correctly on non-conventional naming.**
+- **Test (c) — manual non-conventional format on skill-built connection:** Acknowledged untestable without modifying shared org state. The Step 4a confirmation dialog explicitly names the silent-clobber risk so the failure mode shifts from "silent data loss" to "user-must-confirm-the-list." Acceptable risk pattern for v1.
+
+**Q2 — Deploy output shape:** Resolved from prior `diagnose-connection` empirical validation. When the merged surface XML contains existing formats + a new format:
+- Existing formats appear as `Unchanged` in the deploy output
+- New format appears as `Created`
+- Surface itself appears as `Changed` (treated as update)
+
+Step 9 verification doesn't need to parse `Changed/Created/Unchanged` status. It re-runs Method A+B against the deployed surface and compares the format-name list against the expected list.
+
+**Both load-bearing questions resolved.** No mitigation needed beyond what's already in the plan (Step 4a hard-stop on zero detection, Step 4a confirmation dialog on non-zero detection, Step 9 full-list verification post-deploy).
+
 ---
 
 ## Reviewer Sign-off Checklist
@@ -523,6 +540,13 @@ Before declaring v1 ready to build:
   - **README and GUIDE updates required** in the sign-off checklist, not optional.
 
   Sign-off checklist expanded from 8 to 13 non-technical UX items.
+
+- **v1.4 (2026-05-13 — final, validation complete + two sign-offs):** Q1 and Q2 validated empirically against test-org. Validation Results section added.
+  - Q1 Test (a) BCU01: Method A finds both formats correctly. ✅
+  - Q1 Test (b) TestEscalation MicrosoftTeams (non-conventional naming with `TeamsText`): Method A finds zero. Step 4a hard-stop fires. Safety rail confirmed. ✅
+  - Q1 Test (c): Acknowledged untestable without modifying shared org state. Mitigation is the Step 4a confirmation dialog, which shifts the failure mode from silent loss to user-confirmation.
+  - Q2: Resolved from prior diagnose-connection validation. Existing formats appear as Unchanged, new as Created, surface as Changed. Step 9 doesn't need to parse status — it counts names instead.
+  - Two reviewers signed off. **Plan is build-ready.**
 
 - **v1.3 (2026-05-13 — third review, 4 items addressed):** Reviewer pass surfaced 4 items, 3 of which were genuine new additions:
   - **Step 7a added — explicit confirmation gate before deploy.** Two confirmations in the flow now: Step 4a (does the detected state look right?) and Step 7a (is the planned change correct?). Each guards a different risk. Step 7a is the "measure twice, cut once" moment for the skill's one destructive action.
