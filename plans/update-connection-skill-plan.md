@@ -190,6 +190,26 @@ This converts a silent failure mode into an explicit guardrail.
 sf project deploy start --metadata-dir <merged-output> --target-org $ORG_ALIAS
 ```
 
+### Step 7a: Explicit confirmation gate before deploy
+
+The skill performs **one destructive operation**: regenerating the AiSurface XML and deploying it. That deserves a distinct user gate, not just an implicit "proceed" after Step 4a's confidence checkpoint.
+
+After Step 4a (detection confirmation) and the format-picker (which already filtered out duplicates at the UX level), the skill shows a final summary and asks:
+
+```
+Here's what I'm about to do:
+
+  Connection: AcmePortal_ACME01
+  Currently has: 2 formats (Text Choices, Image Cards)
+  After this change: 3 formats (adding Time Picker)
+
+This will redeploy your connection's configuration. Reply "proceed"
+to deploy, or "stop" to cancel. (Nothing is changed in your org until
+you reply "proceed".)
+```
+
+Two confirmations in the flow — Step 4a (does the detected state look right?) and Step 7a (is the planned change correct?). They protect different things: Step 4a guards against silent data loss from missed formats; Step 7a guards against typos and changed-mind cancellations.
+
 **8. Verify the deploy by re-running Method A+B against the deployed surface.** This isn't just "did the new format land" — it's "is the **full expected format list** intact." Three things to compare:
 
 - **Expected list:** detected formats from Step 4 (e.g., 2) + the new format being added (1) = 3 expected.
@@ -206,13 +226,19 @@ Three outcomes:
 
 ### Deploy atomicity (rollback behavior)
 
-Deploys via `--metadata-dir` are atomic — the entire metadata bundle either succeeds together or fails together. There's no partial-deploy state where some files land and others don't. Practical consequences:
+Deploys via `--metadata-dir` are atomic at the **deploy operation** level — within a single deploy call, the entire metadata bundle either succeeds together or fails together. Practical consequences:
 
 - **If deploy fails** (e.g., invalid JSON in the new format's schema, schema validation error from the API, transient network issue): **nothing changes in the org.** The existing surface and existing formats are untouched. The skill reports the API error verbatim plus a plain-English explanation, and exits cleanly.
-- **No rollback needed.** Since nothing was committed, there's nothing to roll back. The user fixes the issue (e.g., corrects the schema) and re-runs the skill.
+- **No rollback needed for the standard failure path.** Since nothing was committed, there's nothing to roll back. The user fixes the issue (e.g., corrects the schema) and re-runs the skill.
 - **The temp workspace can be removed safely** any time — it never holds state the org needs.
 
-The skill prompt's error-handling rules cover the specific failure shapes (network timeout, malformed format JSON, agent activated mid-flow) and map them to plain-English messages with concrete fixes.
+**Edge case — orphaned metadata from a partial deploy:** It's theoretically possible (though rare in practice with `--metadata-dir`) for one component in the deploy bundle to succeed while another fails — leaving the new `.aiResponseFormat` deployed but the merged `AiSurface` not updated, or vice versa. This shows up in the deploy result as a partial success, not a clean fail. If the skill detects this:
+
+- Report the partial-success state explicitly: "Your new format `<name>` deployed successfully, but the connection's configuration update failed. The format exists in your org but isn't wired to the connection — it's orphaned."
+- Suggest the user run `/project:diagnose-connection` to confirm the orphaned state and decide what to do (the diagnose skill flags formats not wired to a surface).
+- The skill does NOT auto-rollback (delete the orphaned format). Rolling back metadata mid-flow is risky — better to surface the state and let the user choose.
+
+The skill prompt's error-handling rules cover the specific failure shapes (network timeout, malformed format JSON, agent activated mid-flow, partial deploy) and map each to plain-English messages with concrete fixes.
 
 ### Output
 
@@ -406,12 +432,12 @@ Same repo. Trio becomes a quartet.
 | Task | Hours |
 |------|-------|
 | Skill prompt (`.claude/commands/update-connection.md`) | ~4 |
-| Stateful merge logic (parse existing surface, generate merged XML) | ~2 |
+| Stateful merge logic — Method A scan + Method B probe + XML merge + post-deploy verification | ~3 |
 | Deduplication check (warn user before adding a format that already exists) | ~1 |
 | JSON output template + before/after diff structure | ~0.5 |
 | Testing against test-org (add each format type, verify before/after, dedup detection, deactivation enforcement) | ~3 |
 | Documentation (README + GUIDE updates) | ~1 |
-| **Total** | **~11.5h** |
+| **Total** | **~12.5h** |
 
 **Risk margin:** add 2h if the dry-run probe reveals edge cases when the surface has unusual existing formats (e.g., a format the user added manually with non-standard naming).
 
@@ -423,7 +449,7 @@ Same repo. Trio becomes a quartet.
 |---|----------|-----------|
 | 1 | **Stateful merge architecture** | Building "pull current state + merge change + deploy" once means add/remove/modify all share the same architecture. Three sibling skills would each reimplement the pull-and-parse step. |
 | 2 | **V1 supports add only** | Adding doesn't break deployed sessions. Removing and modifying do. Ship the safe verb first; layer risky verbs onto the same architecture in v2. |
-| 3 | **Custom connections only** | Standard connections don't have user-defined response formats. Nothing to update there. Trying to extend would expand scope without adding value. |
+| 3 | **Custom connections only (v1)** | Standard connections don't currently support user-defined response formats — nothing to update there. **Trajectory:** the platform roadmap extends custom response formats to standard connections (Messaging, Web). When that ships, this skill should add standard-connection support — same architecture, just a different surface type filter in Step 1's connection picker. v1 stays custom-only to avoid speculative scope. Revisit when the standard-connection format feature reaches GA. |
 | 4 | **Show before/after explicitly** | The user must see what exists before they confirm a change. Silent edits are how connections get clobbered. The before/after diff in both markdown and JSON makes the change auditable. |
 | 5 | **Deduplication check before deploy** | If the user picks a format type that already exists on the connection (e.g., adding a second "Text Choices"), warn them. This is a near-certain user mistake — not something we silently allow. |
 | 6 | **Reuse retrieve+parse from diagnose-connection** | Don't reinvent the bundle retrieve, the multi-version fallback, or the surface dry-run probe. Those are the exact same operations. |
@@ -439,7 +465,7 @@ Same repo. Trio becomes a quartet.
 
 | # | Question | Why It Matters | Validation Plan |
 |---|----------|---------------|----------------|
-| 1 | **Does Method A (naming-convention scan) reliably find all formats for a surface?** | The skill's Step 4 depends on Method A's accuracy. If Method A misses a format that actually exists (e.g., a format with non-conventional naming), the merge logic generates a surface XML missing that format — **silently clobbering it on deploy**. Method B catches missing-from-org cases but not present-in-org-but-missed-by-Method-A cases. This is the load-bearing risk in the entire skill. | **Three validation runs against test-org:** (a) BaxterCreditUnion_BCU01 (skill-built, conventional naming) — Method A should find all formats. (b) TestEscalation's MicrosoftTeams (non-conventional naming) — Method A should find zero, triggering the hard-stop guard. (c) **Critical:** manually add a non-conventionally-named format to a skill-built connection in test-org, then run the skill — confirm Method A's detection list omits it, the Step 4a confirmation prompt warns the user, and (if they still proceed) Step 9's verification catches the clobbering. If any of these three fail, we need a third detection approach (or a hard-stop on connections we can't fully enumerate) before v1 ships. |
+| 1 | **Does Method A (naming-convention scan) reliably find all formats for a surface?** | The skill's Step 4 depends on Method A's accuracy. If Method A misses a format that actually exists (e.g., a format with non-conventional naming), the merge logic generates a surface XML missing that format — **silently clobbering it on deploy**. Method B catches missing-from-org cases but not present-in-org-but-missed-by-Method-A cases. This is the load-bearing risk in the entire skill. | **Three validation runs against test-org:** (a) BaxterCreditUnion_BCU01 (skill-built, conventional naming) — Method A should find all formats. (b) **Concrete real-world case: TestEscalation's MicrosoftTeams connection.** It has `TeamsText` deployed (non-conventional naming, no `_<SurfaceId>` suffix). Method A's filter `MicrosoftTeams*_<SurfaceId>` should find zero formats, triggering the hard-stop guard. If `TeamsText` somehow does match, document why. If Method A finds zero (the expected case), confirm the hard-stop fires and prevents deploy. (c) **Critical mixed case:** manually add a non-conventionally-named format to a skill-built connection in test-org, then run the skill — confirm Method A's detection list omits it, the Step 4a confirmation prompt warns the user, and (if they still proceed) Step 9's verification catches the clobbering. **If validation fails, mitigation options:** (i) add a third detection method (SOQL query against `AiSurface` or a junction object if one exists in the platform schema), (ii) require the user to manually confirm the detected format count matches their expectation as a hard gate, or (iii) refuse to deploy on any connection where Method A finds zero formats but the bundle wires the surface (current Step 4a hard-stop already does this — extend to "anywhere we suspect non-conventional naming"). Decide before v1 ships. |
 | 2 | **What does the deploy step return when the existing surface is "updated" with the same format list plus a new one?** | If the API treats "surface XML with 2 existing formats + 1 new format" as a no-op for the existing 2 and a "Created" for the new 1, we know the merge worked. If it treats the whole surface as "Changed" without distinguishing, we need a different verification approach. | Add a format to BCU_Test's BaxterCreditUnion_BCU01 connection in test-org via the skill. Inspect the deploy output. Document. |
 | 3 | ~~**What's the right deduplication behavior — silent skip, warn, or hard error?**~~ | ~~Three options: (a) warn and confirm, (b) hard-error refuse, (c) silent no-op.~~ | **Resolved (post-v1 review):** warn and confirm (option a). A hard error blocks the legitimate use case of replacing a format with a new version of the same type — and the user has no "remove" verb yet to work around it. Warn+confirm preserves safety without dead-ending iteration. The format-picker also filters duplicates at the UX level (per Non-Technical UX section), so users only hit this prompt if they explicitly bypass the picker. |
 | 4 | **Should the dedup check warn even on different format developer names?** | The user might add `AcmePortalChoices_ACME01_v2` (a renamed variant) when `AcmePortalChoices_ACME01` already exists. Different developer names but functionally a duplicate. | v1: only check exact developer name match. Treating "similar names" as duplicates introduces false positives. The user can rename if they hit a real conflict. |
@@ -497,6 +523,13 @@ Before declaring v1 ready to build:
   - **README and GUIDE updates required** in the sign-off checklist, not optional.
 
   Sign-off checklist expanded from 8 to 13 non-technical UX items.
+
+- **v1.3 (2026-05-13 — third review, 4 items addressed):** Reviewer pass surfaced 4 items, 3 of which were genuine new additions:
+  - **Step 7a added — explicit confirmation gate before deploy.** Two confirmations in the flow now: Step 4a (does the detected state look right?) and Step 7a (is the planned change correct?). Each guards a different risk. Step 7a is the "measure twice, cut once" moment for the skill's one destructive action.
+  - **Orphaned metadata edge case documented.** Deploy atomicity section now explicitly addresses partial-success state (e.g., format deploys but merged surface fails). Skill reports the orphaned state and points the user at `/project:diagnose-connection` rather than auto-rolling-back. Auto-rollback would be riskier than transparency.
+  - **Decision #3 expanded with standard-connection trajectory.** v1 custom-only stays — but the plan now explicitly notes the platform roadmap extends custom formats to standard connections (Messaging, Web). When that GAs, this skill adds support with the same architecture. Acknowledges the future without scoping it into v1.
+  - **Open Question #1 validation plan further sharpened.** TestEscalation's `MicrosoftTeams` / `TeamsText` is now called out as the **specific concrete case** to validate against (not just "non-conventional naming"). Three explicit mitigation paths if validation fails: third detection method, user-confirms-count gate, or hard-stop on any suspected-non-conventional surface.
+  - **Effort estimate bumped from 11.5h to 12.5h.** Method A+B execution and post-deploy verification are non-trivial. The "stateful merge logic" line item now explicitly includes them at 3h instead of 2h.
 
 - **v1.2 (2026-05-13 — second review, 3 items addressed):** Reviewer flagged the "clobbering unseen formats" risk as more severe than v1.1 acknowledged.
   - **Step 4a rewritten** to make the failure mode concrete. Added a worked example (`MySpecialWidget` getting silently removed when only Acme-prefixed formats are detected). The confirmation dialog now explicitly names the risk — "SILENTLY REMOVED from your connection on the next deploy" — instead of euphemizing it as "custom description text."
