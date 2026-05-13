@@ -138,28 +138,38 @@ The skill reuses `diagnose-connection`'s two-method approach to infer the curren
 
 ### Step 4a: Detection confidence checkpoint (the safety rail)
 
-Method A is a heuristic — it works for skill-built connections but can miss formats with non-conventional naming. For a read-only skill (diagnose) a miss just means an incomplete report. For this skill, **a miss means data loss on deploy**: the regenerated surface won't reference the format we couldn't detect, and the next deploy disconnects it from the connection.
+This is the **load-bearing risk** in the skill. Spelling it out clearly:
 
-The skill addresses this with an explicit user confirmation **before any deploy**:
+The skill regenerates the AiSurface XML from scratch using only the formats it discovers via Method A + Method B. **Any format linked to the surface that Method A misses (because it has non-standard naming) gets silently dropped on the next deploy.** Method B doesn't catch this — it only validates formats you include in the temp surface, not formats you're omitting.
+
+**Concrete failure example:** User hand-adds `MySpecialWidget.aiResponseFormat` to their `AcmePortal_ACME01` surface via Agent Builder. Method A's pattern (`AcmePortal*_ACME01`) doesn't match `MySpecialWidget`. The skill discovers `AcmePortalChoices_ACME01` and `AcmePortalChoicesWithImages_ACME01` (2 formats), regenerates the surface with those 2 + the new format the user is adding = 3 total. Deploy succeeds. **`MySpecialWidget` is now silently removed from the connection.**
+
+This is data loss masquerading as a successful deploy. The skill addresses it with an explicit confidence-checkpoint dialog **before any deploy**:
 
 ```
 I found 2 existing formats on your connection:
   1. AcmePortalChoices_ACME01 (Text Choices)
   2. AcmePortalChoicesWithImages_ACME01 (Choices with Images)
 
-If this doesn't match what you expect, say "stop" and I'll exit
-without changing anything. Otherwise I'll add the new format you
-picked and redeploy.
+⚠ Important: I detect formats by naming convention. If you've added
+  formats manually (e.g., through Agent Builder) with names that don't
+  follow the <ClientName><Type>_<SurfaceId> pattern, I won't see them
+  here — and they'd be SILENTLY REMOVED from your connection on the next
+  deploy.
+
+If the list above doesn't match what you expect, say "stop" and I'll
+exit without changing anything. Otherwise I'll add the new format you
+picked and redeploy with the 3 formats listed.
 ```
 
-The user confirms the detected state before anything is deployed. This turns the unknown-unknowns problem (formats Method A can't detect) into a UX gate rather than silent clobbering.
+The dialog explicitly names the failure mode (silently removed) so the user can spot it. The user is the only one who can — Method A is fundamentally a heuristic, not a complete enumeration.
 
-**Special case — Method A finds zero formats** but the bundle references the surface (so it must have at least one format wired). The skill stops with a stronger message:
+**Special case — Method A finds zero formats** but the bundle references the surface (so the surface must have at least one format wired, otherwise the bundle wouldn't load). The skill **hard stops** here, no confirmation prompt, no deploy:
 
 ```
 I couldn't detect any existing response formats on your connection,
 but your agent's configuration says this connection is wired up. This
-usually means your formats use non-standard naming I don't recognize.
+means your formats use non-standard naming I don't recognize.
 
 Continuing would regenerate your connection's configuration without
 those formats — disconnecting them from your connection.
@@ -180,7 +190,19 @@ This converts a silent failure mode into an explicit guardrail.
 sf project deploy start --metadata-dir <merged-output> --target-org $ORG_ALIAS
 ```
 
-**8. Verify the new format is in the deployed surface** by re-running the dry-run probe. If the new format name appears in the list, deploy succeeded.
+**8. Verify the deploy by re-running Method A+B against the deployed surface.** This isn't just "did the new format land" — it's "is the **full expected format list** intact." Three things to compare:
+
+- **Expected list:** detected formats from Step 4 (e.g., 2) + the new format being added (1) = 3 expected.
+- **Detected list after deploy:** Method A+B re-run against the now-deployed surface.
+- **Compare counts and names.**
+
+Three outcomes:
+
+| Result | Meaning | Skill behavior |
+|--------|---------|----------------|
+| Counts match, names match | Deploy succeeded cleanly | Report success |
+| Count is **lower** than expected | Something was clobbered (a format we expected to keep is missing) | **Hard warning** in the report — this is the failure mode the safety rail in Step 4a was guarding against. Tell the user: "Expected N formats after deploy, found M. A format may have been lost — check Agent Builder → your connection. If a format you didn't see in the pre-deploy list is now missing, this is the silent-clobbering failure mode the skill warned about." |
+| Count is right but the new format isn't detected | Deploy succeeded per the API but the post-deploy probe can't see the new format yet | **Soft warning** — likely a metadata caching delay or a name-matching nuance. The deploy output said success, so the format is most likely there. Suggest the user run `/project:diagnose-connection` to double-check, or look in Agent Builder directly. Don't treat as a hard failure. |
 
 ### Deploy atomicity (rollback behavior)
 
@@ -417,7 +439,7 @@ Same repo. Trio becomes a quartet.
 
 | # | Question | Why It Matters | Validation Plan |
 |---|----------|---------------|----------------|
-| 1 | **Does Method A (naming-convention scan) reliably find all formats for a surface?** | The skill's Step 4 depends on Method A's accuracy. If Method A misses a format that actually exists (e.g., a format with non-conventional naming), the merge logic generates a surface XML missing that format — clobbering it on deploy. Method B catches missing-from-org cases but not present-in-org-but-missed-by-Method-A cases. | Validate against test-org's BaxterCreditUnion_BCU01 (skill-built, naming convention holds) AND TestEscalation's MicrosoftTeams (non-conventional naming). Document the gap. If Method A is unreliable, we need a third detection approach before v1 ships. |
+| 1 | **Does Method A (naming-convention scan) reliably find all formats for a surface?** | The skill's Step 4 depends on Method A's accuracy. If Method A misses a format that actually exists (e.g., a format with non-conventional naming), the merge logic generates a surface XML missing that format — **silently clobbering it on deploy**. Method B catches missing-from-org cases but not present-in-org-but-missed-by-Method-A cases. This is the load-bearing risk in the entire skill. | **Three validation runs against test-org:** (a) BaxterCreditUnion_BCU01 (skill-built, conventional naming) — Method A should find all formats. (b) TestEscalation's MicrosoftTeams (non-conventional naming) — Method A should find zero, triggering the hard-stop guard. (c) **Critical:** manually add a non-conventionally-named format to a skill-built connection in test-org, then run the skill — confirm Method A's detection list omits it, the Step 4a confirmation prompt warns the user, and (if they still proceed) Step 9's verification catches the clobbering. If any of these three fail, we need a third detection approach (or a hard-stop on connections we can't fully enumerate) before v1 ships. |
 | 2 | **What does the deploy step return when the existing surface is "updated" with the same format list plus a new one?** | If the API treats "surface XML with 2 existing formats + 1 new format" as a no-op for the existing 2 and a "Created" for the new 1, we know the merge worked. If it treats the whole surface as "Changed" without distinguishing, we need a different verification approach. | Add a format to BCU_Test's BaxterCreditUnion_BCU01 connection in test-org via the skill. Inspect the deploy output. Document. |
 | 3 | ~~**What's the right deduplication behavior — silent skip, warn, or hard error?**~~ | ~~Three options: (a) warn and confirm, (b) hard-error refuse, (c) silent no-op.~~ | **Resolved (post-v1 review):** warn and confirm (option a). A hard error blocks the legitimate use case of replacing a format with a new version of the same type — and the user has no "remove" verb yet to work around it. Warn+confirm preserves safety without dead-ending iteration. The format-picker also filters duplicates at the UX level (per Non-Technical UX section), so users only hit this prompt if they explicitly bypass the picker. |
 | 4 | **Should the dedup check warn even on different format developer names?** | The user might add `AcmePortalChoices_ACME01_v2` (a renamed variant) when `AcmePortalChoices_ACME01` already exists. Different developer names but functionally a duplicate. | v1: only check exact developer name match. Treating "similar names" as duplicates introduces false positives. The user can rename if they hit a real conflict. |
@@ -475,6 +497,11 @@ Before declaring v1 ready to build:
   - **README and GUIDE updates required** in the sign-off checklist, not optional.
 
   Sign-off checklist expanded from 8 to 13 non-technical UX items.
+
+- **v1.2 (2026-05-13 — second review, 3 items addressed):** Reviewer flagged the "clobbering unseen formats" risk as more severe than v1.1 acknowledged.
+  - **Step 4a rewritten** to make the failure mode concrete. Added a worked example (`MySpecialWidget` getting silently removed when only Acme-prefixed formats are detected). The confirmation dialog now explicitly names the risk — "SILENTLY REMOVED from your connection on the next deploy" — instead of euphemizing it as "custom description text."
+  - **Step 9 rewritten** as full-list verification, not just new-format verification. Re-runs Method A+B after deploy and compares the full count + names against the expected list (existing + new). Three outcomes: clean deploy, count-lower-than-expected (hard warning, something was clobbered), new-format-not-detected (soft warning, likely caching delay). The third outcome is the "deploy succeeded but verify failed" failure mode the reviewer flagged as missing.
+  - **Open Question #1 validation plan expanded** to three concrete test cases including the critical scenario: manually add a non-conventionally-named format to a skill-built connection, then run the skill and confirm the safety rail catches it. If validation fails, we need a third detection approach before shipping.
 
 - **v1.1 (2026-05-13 — post-review polish, 4 items addressed):** First reviewer pass on v1 surfaced 4 refinements:
   - **Method A safety rail (Step 4a added):** the skill now shows the formats it detected and asks the user to confirm before any deploy. Special case for "Method A finds zero formats but bundle wires the surface" — hard stop with explanation, no deploy. Turns the unknown-unknowns problem into a UX gate rather than silent clobbering.
