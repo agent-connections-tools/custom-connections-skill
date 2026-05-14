@@ -560,6 +560,109 @@ The report grades only the **last meaningful structured response** — not the e
 
 ---
 
+## Step 12: Updating an existing connection
+
+Steps 1-9 cover building a connection from scratch. Step 10 diagnoses problems. Step 11 tests at runtime. **Step 12 is what you use when an existing connection needs a new response format added.**
+
+```
+/project:update-connection
+```
+
+The skill is **read-mostly with one destructive operation** — it creates and deploys a merged version of your connection's configuration. Two safety gates protect that one operation.
+
+> **State requirement:** The agent must be **deactivated** before this skill runs. Same as `build-custom-connection` and `diagnose-connection`. After deploying, you reactivate and run `test-connection` to verify the new format works.
+
+### What it does
+
+The skill walks you through 13 steps under the hood, but you only see four questions:
+
+1. **Org alias** — same as the other skills.
+2. **Agent's developer name** — same as the other skills.
+3. **Which custom connection to update** — it lists every custom connection on the agent and lets you pick one.
+4. **Which format to add** — it shows only formats not already on the connection. You can't accidentally pick a duplicate.
+
+Then the skill:
+- Pulls the agent's bundle (with multi-version fallback)
+- Confirms the agent is deactivated
+- Detects what response formats are currently on the chosen connection
+- Shows you the detected list and asks you to confirm — explicitly warns that any format you've added manually outside the skill family with non-standard naming would be silently dropped if the list is wrong
+- Generates the new format file
+- Merges it with your existing format list (preserving every existing format)
+- Asks you to confirm the planned change before deploying
+- Deploys
+- Verifies the full list (existing + new) is intact on the deployed connection
+
+### Why "stateful merge" is harder than building from scratch
+
+`build-custom-connection` is stateless — it generates files from scratch every run. `update-connection` is the first skill in the family that **reads org state and writes back to it**. The hard part isn't deploying a new file; it's deploying a new file without dropping any of the formats already linked to the connection.
+
+Specifically: the connection's configuration includes a list of every response format it uses. If the skill regenerated the configuration from scratch (the build skill's pattern), any format that wasn't in the current build would be dropped. So the skill has to:
+1. Discover what formats are already on the connection
+2. Append the new format to that list (don't replace)
+3. Deploy the merged result
+
+The discovery step is where things get tricky: the platform CLI can't directly retrieve the connection's configuration by name. The skill works around this with a two-method approach:
+- **Method A** lists every response format in the org and filters by the connection's naming convention
+- **Method B** uses a dry-run deploy to confirm the candidates Method A found actually exist
+
+Combined, they handle the 95% case (connections built with this skill family). For the 5% case (connections built by hand with non-standard naming), Method A might miss formats — that's why the skill explicitly asks you to confirm the detected list before any deploy. **You're the only one who can spot a missed format.**
+
+### Reading the report
+
+The report has three time-sequenced sections so the change is auditable:
+
+| Section | What it means |
+|---|---|
+| **CURRENT STATE** | What was on the connection before you ran the skill — every existing format listed by name and friendly type. |
+| **CHANGE** | The single thing the skill is about to do — "Add Time Picker." |
+| **NEW STATE** | What's on the connection after deploy — every format, with the new one tagged "— NEW." |
+
+If anything looks wrong (e.g., a format you expected to see in CURRENT STATE isn't there), say stop. Nothing has been deployed yet.
+
+The skill also saves a JSON copy to `/tmp/update-connection-report.json` with a `before` and `after` block, useful for CI/CD pipelines that want to assert on the diff.
+
+### Two safety gates before any deploy
+
+The skill has two confirmation prompts. They guard different risks.
+
+**Gate 1 — detection confirmation (after the skill scans your connection):**
+
+The skill shows you the list of formats it detected and explicitly warns:
+
+> "I detect formats by naming convention. If you've added formats manually (e.g., through Agent Builder) with names that don't follow the `<ClientName><Type>_<SurfaceId>` pattern, I won't see them here — and they'd be SILENTLY REMOVED from your connection on the next deploy."
+
+If the list doesn't match what you expect, say stop. The skill exits without deploying anything.
+
+**Special case:** if the skill finds zero formats but your connection's configuration says it has formats wired, the skill **hard stops** without even asking. Continuing would silently disconnect formats it can't see. To proceed, you'd need to rename your formats to follow the convention or wait for a future skill that supports non-conventional naming.
+
+**Gate 2 — change confirmation (after the skill generates the merged configuration):**
+
+```
+Currently has: 2 formats (Text Choices, Image Cards)
+After this change: 3 formats (adding Time Picker)
+
+This will redeploy your connection's configuration. Reply "proceed"
+to deploy, or "stop" to cancel. (Nothing has changed in your org yet.)
+```
+
+This is the "measure twice, cut once" moment for the one destructive action.
+
+### What the skill won't do (yet)
+
+- **Doesn't remove formats.** v1 only adds. Removing a format risks breaking active client apps that already parse the old shape — that's a v2 concern.
+- **Doesn't modify response format schemas.** Same risk profile. v2.
+- **Doesn't change surface-level instructions.** Pure text change, low risk, but adds a second verb to v1's scope. v2.
+- **Doesn't work on standard connections.** Telephony, Web Chat, Email, and Messaging don't currently support user-defined response formats. The platform roadmap will eventually extend custom formats to standard connections — when that ships, this skill will add support, but it's custom-only for now.
+- **Doesn't preserve hand-edited surface fields.** The platform CLI can't retrieve the connection's full configuration by name. The skill regenerates it from scratch each deploy — so any custom fields you edited in the org's UI (custom description text, custom instructions on the surface itself) will be lost. The skill flags this in the detection-confirmation prompt before any deploy.
+
+### When to run it
+
+- **You deployed a connection with a few formats and now want to add another.** This is the primary use case.
+- **Iterating during agent development.** Each time you realize you need a new format type, run this skill.
+- **After running the test skill and seeing the agent didn't have the right format available** — add the missing format, retest.
+
+---
+
 ## Troubleshooting
 
 | Issue | Resolution |
