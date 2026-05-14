@@ -374,6 +374,8 @@ ISSUES (N)
 JSON report saved to: /tmp/test-connection-report.json
 ```
 
+**Counting rule:** The summary line counts **top-level checks only** — the same entries listed in the JSON report's `checks` array. The PRE-FLIGHT and TEST SEQUENCE check-mark lines in the markdown are informational detail (so the user can see what's happening), NOT separate checks. The summary count must match the JSON `passed` / `warnings` / `failed` counts exactly. If the terminal says "15 passed" but the JSON says "passed: 7", that's a bug — pick one canonical number and use it in both places. The JSON `checks` array is the source of truth.
+
 ### JSON report
 
 Save to `/tmp/test-connection-report.json`. The schema version is `test-connection-v1` (independent of plan version):
