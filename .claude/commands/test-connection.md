@@ -19,18 +19,21 @@ Ask these questions ONE AT A TIME (don't list them all at once). Wait for each a
 
 1. **What's your org alias?** This is the short name you used with `sf org login`. If they're not sure, suggest running `sf org list` to see their connected orgs.
 
-2. **What's your agent's name?** Help them find it:
-   - Go to **Setup → Agents** and look at the API Name column
+2. **What's your agent's developer name?** This is the API name of your agent (e.g., `Customer_Support_Agent`), not the display label. The skill auto-handles the bundle suffix for multi-version agents. Help them find it:
+   - Go to **Setup → Agents** and look at the API Name column (NOT the Label column)
    - Or run: `sf data query --query "SELECT DeveloperName FROM BotDefinition" --target-org <org>`
 
-3. **Which connection do you want to test?** After you retrieve the agent (Step 3), list every connection you found with a friendly type label:
+   If the user says something that looks like a display label (e.g., "Customer Support Agent" with spaces) instead of a developer name, gently ask them to confirm: "That looks like the display label. Can you check Setup → Agents → API Name column? It should be one word with underscores (e.g., `Customer_Support_Agent`)."
+
+3. **Which connection do you want to test?** After you retrieve the agent (Step 3), list every connection you found with both a friendly type label AND the underlying `surfaceType` value (so users know exactly which standard surface they're picking). Custom connections show "(custom)":
    ```
-   1. Telephony (standard)
-   2. Web Chat (standard)
-   3. Email (standard)
-   4. BaxterCreditUnion_BCU01 (custom)
+   1. Telephony (standard — Telephony)
+   2. Web Chat (standard — CustomerWebClient)
+   3. Email (standard — ServiceEmail)
+   4. Messaging (standard — Messaging)
+   5. BaxterCreditUnion_BCU01 (custom)
    ```
-   Friendly type labels: `SurfaceAction__Telephony` → "Telephony", `SurfaceAction__CustomerWebClient` → "Web Chat", `SurfaceAction__ServiceEmail` → "Email", `SurfaceAction__Messaging` → "Messaging". Custom connections use their developer name as-is.
+   Friendly type labels: `SurfaceAction__Telephony` → "Telephony", `SurfaceAction__CustomerWebClient` → "Web Chat", `SurfaceAction__ServiceEmail` → "Email", `SurfaceAction__Messaging` → "Messaging". Custom connections use their developer name as-is. The surfaceType in parentheses is the raw bundle value — it's what the skill passes to the Agent API.
 
 4. **Do you have an External Client App set up for the Agent API?**
    - If yes → ask for the **Consumer Key** and **Consumer Secret** (from **Setup → External Client Apps Manager → your app → OAuth Settings**)

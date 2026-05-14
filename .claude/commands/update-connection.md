@@ -26,9 +26,11 @@ Ask these questions ONE AT A TIME (don't list them all at once):
 
 1. **What's your org alias?** If they're not sure, suggest `sf org list`.
 
-2. **What's your agent's name?** Help them find it:
-   - Go to **Setup → Agents** and look at the API Name column
+2. **What's your agent's developer name?** This is the API name of your agent (e.g., `Customer_Support_Agent`), not the display label. The skill auto-handles the bundle suffix for multi-version agents. Help them find it:
+   - Go to **Setup → Agents** and look at the API Name column (NOT the Label column)
    - Or run: `sf data query --query "SELECT DeveloperName FROM BotDefinition" --target-org <org>`
+
+   If the user says something that looks like a display label (e.g., "Customer Support Agent" with spaces) instead of a developer name, gently ask them to confirm: "That looks like the display label. Can you check Setup → Agents → API Name column? It should be one word with underscores (e.g., `Customer_Support_Agent`)."
 
 After you retrieve the agent (Step 3), list every custom connection on it with the count of formats currently on each:
 

@@ -10,9 +10,11 @@ Ask these questions ONE AT A TIME (don't list them all at once):
 
 1. **What's your org alias?** This is the short name you use with Salesforce CLI commands (e.g., `my-dev-org`). If they're not sure, suggest running `sf org list` to see their connected orgs.
 
-2. **What's your agent's name?** Help them find it:
-   - Go to **Setup → Agents** and look at the API Name column
+2. **What's your agent's developer name?** This is the API name of your agent (e.g., `Customer_Support_Agent`), not the display label. The skill auto-handles the bundle suffix for multi-version agents. Help them find it:
+   - Go to **Setup → Agents** and look at the API Name column (NOT the Label column)
    - Or run: `sf data query --query "SELECT DeveloperName FROM BotDefinition" --target-org <org>`
+
+   If the user says something that looks like a display label (e.g., "Customer Support Agent" with spaces) instead of a developer name, gently ask them to confirm: "That looks like the display label. Can you check Setup → Agents → API Name column? It should be one word with underscores (e.g., `Customer_Support_Agent`)."
 
 After you retrieve the agent, list the connections you found and ask:
 3. **Which connection do you want to check?** List the connections by number and offer "all" to check everything. If they pick a specific one, only run checks for that connection (skip the others). If they say "all", check everything.
