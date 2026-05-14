@@ -103,10 +103,47 @@ else
         echo "Remove the existing custom surface in Agent Builder first, then re-run."
         exit 1
     fi
-    # Add the new plannerSurfaces entry before the closing tag
-    SURFACE_BLOCK='    <plannerSurfaces>\n        <adaptiveResponseAllowed>true</adaptiveResponseAllowed>\n        <callRecordingAllowed>false</callRecordingAllowed>\n        <surface>{ClientName}_{surfaceId}</surface>\n        <surfaceType>Custom</surfaceType>\n    </plannerSurfaces>'
-    sed -i.bak "s|</GenAiPlannerBundle>|${SURFACE_BLOCK}\n</GenAiPlannerBundle>|" "$BUNDLE_FILE"
-    rm -f "${BUNDLE_FILE}.bak"
+    # Insert the new plannerSurfaces entry right after the LAST existing </plannerSurfaces>
+    # (NOT before </GenAiPlannerBundle>). The platform rejects bundles where
+    # plannerSurfaces blocks aren't grouped together — and bundles often have
+    # other elements (e.g., <voiceDefinition>) between the existing
+    # plannerSurfaces group and </GenAiPlannerBundle>. Inserting before the
+    # closing tag puts our new block on the wrong side of those elements,
+    # splitting the group and triggering "Element plannerSurfaces is duplicated."
+    if grep -q "</plannerSurfaces>" "$BUNDLE_FILE"; then
+        # Bundle has existing plannerSurfaces — insert after the last one.
+        # We write the block to a temp file because BSD awk (macOS default)
+        # rejects multi-line strings passed via -v.
+        BLOCK_FILE=$(mktemp)
+        cat > "$BLOCK_FILE" << 'BLOCKEOF'
+    <plannerSurfaces>
+        <adaptiveResponseAllowed>true</adaptiveResponseAllowed>
+        <callRecordingAllowed>false</callRecordingAllowed>
+        <surface>{ClientName}_{surfaceId}</surface>
+        <surfaceType>Custom</surfaceType>
+    </plannerSurfaces>
+BLOCKEOF
+        awk -v blockfile="$BLOCK_FILE" '
+            /<\/plannerSurfaces>/ { last_idx = NR }
+            { lines[NR] = $0 }
+            END {
+                for (i = 1; i <= NR; i++) {
+                    print lines[i]
+                    if (i == last_idx) {
+                        while ((getline line < blockfile) > 0) print line
+                        close(blockfile)
+                    }
+                }
+            }
+        ' "$BUNDLE_FILE" > "${BUNDLE_FILE}.tmp" && mv "${BUNDLE_FILE}.tmp" "$BUNDLE_FILE"
+        rm -f "$BLOCK_FILE"
+    else
+        # No existing plannerSurfaces — insert before </GenAiPlannerBundle>.
+        # Rare (bundle would need to have no surfaces wired yet) but covered.
+        SURFACE_BLOCK='    <plannerSurfaces>\n        <adaptiveResponseAllowed>true</adaptiveResponseAllowed>\n        <callRecordingAllowed>false</callRecordingAllowed>\n        <surface>{ClientName}_{surfaceId}</surface>\n        <surfaceType>Custom</surfaceType>\n    </plannerSurfaces>'
+        sed -i.bak "s|</GenAiPlannerBundle>|${SURFACE_BLOCK}\n</GenAiPlannerBundle>|" "$BUNDLE_FILE"
+        rm -f "${BUNDLE_FILE}.bak"
+    fi
 fi
 
 # Add package.xml for the redeploy

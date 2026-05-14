@@ -44,10 +44,42 @@ echo "Step 3/4: Adding custom surface to agent bundle..."
 if grep -q "AcmePortal_AcmePortal01" "$BUNDLE_FILE"; then
     echo "Surface already present in bundle — skipping."
 else
-    # Insert plannerSurfaces block before closing tag (portable across macOS and Linux)
-    SURFACE_BLOCK='    <plannerSurfaces>\n        <adaptiveResponseAllowed>true</adaptiveResponseAllowed>\n        <callRecordingAllowed>false</callRecordingAllowed>\n        <surface>AcmePortal_AcmePortal01</surface>\n        <surfaceType>Custom</surfaceType>\n    </plannerSurfaces>'
-    sed -i.bak "s|</GenAiPlannerBundle>|${SURFACE_BLOCK}\n</GenAiPlannerBundle>|" "$BUNDLE_FILE"
-    rm -f "${BUNDLE_FILE}.bak"
+    # Insert plannerSurfaces block right after the LAST existing </plannerSurfaces>.
+    # All plannerSurfaces blocks must be grouped together — bundles often have
+    # other elements (e.g., <voiceDefinition>) between the existing group and
+    # </GenAiPlannerBundle>, so inserting before the closing tag splits the
+    # group and triggers "Element plannerSurfaces is duplicated."
+    if grep -q "</plannerSurfaces>" "$BUNDLE_FILE"; then
+        # Write the block to a temp file — BSD awk (macOS) rejects multi-line -v.
+        BLOCK_FILE=$(mktemp)
+        cat > "$BLOCK_FILE" << 'BLOCKEOF'
+    <plannerSurfaces>
+        <adaptiveResponseAllowed>true</adaptiveResponseAllowed>
+        <callRecordingAllowed>false</callRecordingAllowed>
+        <surface>AcmePortal_AcmePortal01</surface>
+        <surfaceType>Custom</surfaceType>
+    </plannerSurfaces>
+BLOCKEOF
+        awk -v blockfile="$BLOCK_FILE" '
+            /<\/plannerSurfaces>/ { last_idx = NR }
+            { lines[NR] = $0 }
+            END {
+                for (i = 1; i <= NR; i++) {
+                    print lines[i]
+                    if (i == last_idx) {
+                        while ((getline line < blockfile) > 0) print line
+                        close(blockfile)
+                    }
+                }
+            }
+        ' "$BUNDLE_FILE" > "${BUNDLE_FILE}.tmp" && mv "${BUNDLE_FILE}.tmp" "$BUNDLE_FILE"
+        rm -f "$BLOCK_FILE"
+    else
+        # No existing plannerSurfaces — insert before </GenAiPlannerBundle>.
+        SURFACE_BLOCK='    <plannerSurfaces>\n        <adaptiveResponseAllowed>true</adaptiveResponseAllowed>\n        <callRecordingAllowed>false</callRecordingAllowed>\n        <surface>AcmePortal_AcmePortal01</surface>\n        <surfaceType>Custom</surfaceType>\n    </plannerSurfaces>'
+        sed -i.bak "s|</GenAiPlannerBundle>|${SURFACE_BLOCK}\n</GenAiPlannerBundle>|" "$BUNDLE_FILE"
+        rm -f "${BUNDLE_FILE}.bak"
+    fi
 fi
 
 echo ""
